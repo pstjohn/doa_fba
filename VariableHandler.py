@@ -6,7 +6,7 @@ import casadi as cs
 
 class VariableHandler(object):
 
-    def __init__(self, shape_dict, rxn_ids):
+    def __init__(self, shape_dict, rxn_ids=None):
         """ A class to handle the flattening and expanding of the NLP variable
         vector. Solves a lot of headaches.
 
