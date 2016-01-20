@@ -146,25 +146,30 @@ class Collocation(BaseCollocation):
         self.sol = self.var.x_op.reshape((self.nk*(self.d+1)), self.nx)
 
 
-    def _get_interp(self, t, states=None):
-        """ Return a symbolic polynomial representation of the state vector
+    def _get_interp(self, t, states=None, x_rep='sx'):
+        """ Return a polynomial representation of the state vector
         evaluated at time t.
 
         states: list
             indicies of which states to return
 
+        x_rep: 'sx' or 'op', most likely.
+            whether or not to interpolate symbolic or optimal values of the
+            state variable
+
         """
 
-        assert t < self.tf, "Final time must be increased"
+        assert t < self.tf, "Requested time is outside of the simulation range"
 
         h = self.tf / self.nk
 
-        if not states: states = xrange(1, self.nx)
+        if states is None: states = xrange(1, self.nx)
 
         finite_element = int(t / h)
         tau = (t % h) / h
         basis = self.col_vars['lfcn']([tau])[0].toArray().flatten()
-        x_roots = self.var.x_sx[finite_element, :, states]
+        x = getattr(self.var, 'x_' + x_rep)
+        x_roots = x[finite_element, :, states]
 
         return np.inner(basis, x_roots)
 
@@ -252,8 +257,7 @@ class Collocation(BaseCollocation):
                      loc='upper center', ncol=2)
 
         lines = ax[1].plot(self.ts, self.sol[:,0], '.--')
-        ax[1].legend(lines, self.boundary_species[0], loc='upper left',
-                     ncol=1)
+        ax[1].legend(['Biomass'])
 
 
         state_data = self.data.loc[:, self.data.columns > 0]
@@ -269,3 +273,26 @@ class Collocation(BaseCollocation):
         plt.show()
         
         return fig
+
+
+    @property
+    def rss(self):
+        """ Residual sum of squares """
+        
+        x_reg = pd.DataFrame([
+            self._get_interp(t, states=self.data.columns, x_rep='op')
+            for t in self.data.index], index=self.data.index,
+                             columns=self.data.columns)
+
+        return ((self.data - x_reg)**2).sum().sum()
+
+    @property
+    def aic(self):
+        """ Akaike information criterion """
+
+        n = np.multiply(*self.data.shape)
+        k = self.np
+
+        return 2*k + n*np.log(self.rss)
+
+
