@@ -168,7 +168,7 @@ class Collocation(BaseCollocation):
 
         return np.inner(basis, x_roots)
 
-    def set_data(self, data, weights=None):
+    def set_data(self, data, error=None, absolute_error=1E-3):
         """ Attach experimental measurement data.
 
         data : a pd.DataFrame object
@@ -176,23 +176,41 @@ class Collocation(BaseCollocation):
             self.boundary_species, with an index corresponding to the measurement
             times.
 
+        error : a pd.DataFrame object
+            Standard errors associated with the measurement of each
+            datapoint. Used in setting the weights of the NLP regression.
+
+        min_error : float
+            An absolute error estimate, used to prevent the case of infinite
+            weight assigned to measurements with no relative error.
+            (i.e., div / 0.)
+
         """
+
+        if error is None:
+            self._had_error = False
+            # Broadcast max values to the error dataframe
+            error = pd.DataFrame(data)
+            error.values[:] = data.max().values
+        else: self._had_error = True
 
         # Should raise an error if no state name is present
         df = data.loc[:, self.boundary_species]
+        df_err = error.loc[:, self.boundary_species]
 
         # Rename columns with state indicies
         df.columns = np.arange(self.nx)
+        df_err.columns = np.arange(self.nx)
 
         # Remove empty (nonmeasured) states
         self.data = df.loc[:, ~pd.isnull(df).all(0)]
+        self.error = df_err.loc[:, ~pd.isnull(df).all(0)] + absolute_error
 
-        if weights is None:
-            weights = self.data.max()
-
+        stacked_data = pd.concat([self.data.stack(), self.error.stack()], axis=1)
+        stacked_data.columns = ['data', 'error']
         obj_list = []
-        for ((ti, state), xi) in self.data.stack().iteritems():
-            obj_list += [(self._get_interp(ti, [state]) - xi) / weights[state]]
+        for ((ti, state), row) in stacked_data.iterrows():
+            obj_list += [(self._get_interp(ti, [state]) - row.data) / row.error]
 
         obj_resid = cs.sum_square(cs.vertcat(obj_list))
         self.objective_sx += obj_resid
@@ -247,18 +265,42 @@ class Collocation(BaseCollocation):
         fig, ax = plt.subplots(sharex=True, nrows=2, ncols=1,
                                figsize=(8,5))
         
+        # Plot non-biomass simulation
         lines = ax[0].plot(self.ts, self.sol[:,1:], '.--')
         ax[0].legend(lines, self.boundary_species[1:],
                      loc='upper center', ncol=2)
-        state_data = self.data.loc[:, self.data.columns > 0]
-        ax[0].plot(state_data.index, state_data, 'o')
 
+        # Plot biomass simulation
         lines = ax[1].plot(self.ts, self.sol[:,0], '.--')
-        ax[1].legend(lines, self.boundary_species[0], loc='upper left',
+        ax[1].legend(lines, self.boundary_species, loc='upper left',
                      ncol=1)
+
+        # Plot data
+        state_data = self.data.loc[:, self.data.columns > 0]
         bio_data = self.data.loc[:, self.data.columns == 0]
-        if not bio_data.empty:
-            ax[1].plot(bio_data.index, bio_data, 'o')
+
+        state_error = self.error.loc[:, self.data.columns > 0]
+        bio_error = self.error.loc[:, self.data.columns == 0]
+
+
+        if self._had_error:
+            for (name, col), (name, err), color in zip(state_data.iteritems(),
+                                                       state_error.iteritems(),
+                                                       sns.color_palette()):
+                ax[0].errorbar(col.index, col, yerr=err, fmt='o', color=color)
+
+            if not bio_data.empty:
+                ax[1].plot(bio_data.index, bio_data, yerr=bio_error, fmt='o')
+
+        else:
+            for (name, col), color in zip(state_data.iteritems(),
+                                          sns.color_palette()):
+                ax[0].plot(col.index, col, 'o', color=color)
+
+            if not bio_data.empty:
+                ax[1].plot(bio_data.index, bio_data, 'o')
         
         plt.show()
+
+        return fig
         
