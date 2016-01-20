@@ -250,15 +250,22 @@ class Collocation(BaseCollocation):
         lines = ax[0].plot(self.ts, self.sol[:,1:], '.--')
         ax[0].legend(lines, self.boundary_species[1:],
                      loc='upper center', ncol=2)
-        state_data = self.data.loc[:, self.data.columns > 0]
-        ax[0].plot(state_data.index, state_data, 'o')
 
         lines = ax[1].plot(self.ts, self.sol[:,0], '.--')
         ax[1].legend(lines, self.boundary_species[0], loc='upper left',
                      ncol=1)
+
+
+        state_data = self.data.loc[:, self.data.columns > 0]
         bio_data = self.data.loc[:, self.data.columns == 0]
+
+        for (name, col), color in zip(state_data.iteritems(),
+                                      sns.color_palette()):
+            ax[0].plot(col.index, col, 'o', color=color)
+
         if not bio_data.empty:
             ax[1].plot(bio_data.index, bio_data, 'o')
         
         plt.show()
         
+        return fig
