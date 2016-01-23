@@ -50,7 +50,7 @@ class BaseCollocation(object):
         try: self._plot_setup()
         except AttributeError: pass
 
-        return self._result['f']
+        return float(self._result['f'])
 
 
     def _initialize_polynomial_coefs(self):
