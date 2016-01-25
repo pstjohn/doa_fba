@@ -3,8 +3,6 @@ import numpy as np
 
 import casadi as cs
 
-from .VariableHandler import VariableHandler
-
 
 class BaseCollocation(object):
 
