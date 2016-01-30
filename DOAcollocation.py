@@ -51,13 +51,24 @@ class DOAcollocation(BaseCollocation):
         # Handle boundary reactions
         self.boundary_species = boundary_species
         all_boundary_rxns = model.reactions.query('system_boundary', 'boundary')
-        self.boundary_rxns = [r.id for r in [all_boundary_rxns.query(
-            lambda r: r.reactants[0].id in bs)[0] for bs in boundary_species]]
 
+        self.boundary_rxns = []
+        for bs in boundary_species:
+            rxns = all_boundary_rxns.query(lambda r: r.reactants[0].id in bs)
+
+            assert len(rxns) == 1, (
+                "Error finding boundary reactions for {}: ".format(bs) + 
+                "{:d} reactions found".format(len(rxns)))
+
+            self.boundary_rxns += [rxns[0].id]
 
         self.nx = len(boundary_species)
         self.nv = len(self.model.reactions)
         self.nm = len(self.model.metabolites)
+
+        # If tf is left as None, it will be a symbolic variable
+        self.tf = None
+        self.death_rate = None
 
         # Initialize the base class
         super(DOAcollocation, self).__init__()
@@ -152,10 +163,9 @@ class DOAcollocation(BaseCollocation):
         # Plot the results
         lines = ax[0].plot(self.ts, self.sol[:,1:], '.--')
         ax[0].legend(lines, self.boundary_species[1:], loc='upper left', ncol=2)
-
-        # Flux plot
-        active_fluxes = self.var.v_op.max(0) > 1E-4
-        ax[1].step(self.fs, self.var.v_op.loc[:, active_fluxes])
+    
+        # Plot the optimal fluxes
+        self._plot_optimal_fluxes(ax[1])
 
         # Plot the biomass results
         lines = ax[2].plot(self.ts, self.sol[:,0], '.--')
@@ -163,6 +173,9 @@ class DOAcollocation(BaseCollocation):
 
         plt.show()
 
+    def _plot_optimal_fluxes(self, ax):
+        active_fluxes = self.var.v_op.max(0) > 1E-4
+        ax.step(self.fs, self.var.v_op.loc[:, active_fluxes])
 
 
     def _initialize_dynamic_model(self):
@@ -174,6 +187,10 @@ class DOAcollocation(BaseCollocation):
         vb = cs.SX.sym('v', self.nx) # fluxes across the boundary
 
         xdot = vb * x[0]             # Here we assume biomass is in x[0]
+
+        if self.death_rate is not None:
+            xdot[0] -= self.death_rate * x[0]
+
         self.dxdt = cs.SXFunction('dxdt', [t,x,vb], [xdot])
 
         
@@ -184,8 +201,9 @@ class DOAcollocation(BaseCollocation):
         core_variables = {
             'x'  : (self.nk, self.d+1, self.nx),
             'v'  : (self.nk, self.nv),
-            'tf' : (1,),
         }
+
+        if self.tf == None: core_variables.update({'tf' : (1,)})
 
         kkt_variables = {
             'Lambda' : (self.nk, self.nm),
@@ -210,9 +228,10 @@ class DOAcollocation(BaseCollocation):
         self.var.v_in[:] = self.model.fluxes.values[
             :,np.newaxis].repeat(self.nk, axis=1).T # Or 0?
 
-        self.var.tf_lb[:] = 1.
-        self.var.tf_ub[:] = 100.
-        self.var.tf_in[:] = 10.
+        if self.tf == None:
+            self.var.tf_lb[:] = 1.
+            self.var.tf_ub[:] = 100.
+            self.var.tf_in[:] = 10.
 
         # Recast flux array to dataframe for easier indexing
         # self.var.v_sx = pd.DataFrame(
@@ -253,7 +272,10 @@ class DOAcollocation(BaseCollocation):
         """ Add constraints to the model to account for system dynamics and
         continuity constraints """
 
-        h = self.var.tf_sx / self.nk
+        if self.tf == None:
+            h = self.var.tf_sx / self.nk
+        else:
+            h = self.tf / self.nk
 
         # All collocation time points
         T = np.zeros((self.nk, self.d+1), dtype=object)
@@ -360,12 +382,15 @@ class DOAcollocation(BaseCollocation):
     def _plot_setup(self):
 
         # Create vectors from optimized time and states
-        h = self.var.tf_op / self.nk
+        if self.tf == None:
+            h = self.var.tf_op / self.nk
+        else: 
+            h = self.tf / self.nk
 
         self.fs = h * np.arange(self.nk)
         self.ts = np.array(
             [point + h*np.array(self.col_vars['tau_root']) for point in 
-             np.linspace(0, self.var.tf_op, self.nk,
+             np.linspace(0, h * self.nk, self.nk,
                          endpoint=False)]).flatten()
 
         self.sol = self.var.x_op.reshape((self.nk*(self.d+1)), self.nx)
