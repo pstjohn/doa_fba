@@ -191,6 +191,10 @@ class EFMcollocation(DOAcollocation):
         xf = self.col_vars['D'].dot(cs.SX(self.var.x_sx[-1]))
         self.xf = {met : x_sx for met, x_sx in zip(self.boundary_species, xf)}
 
+        # Similarly, get an expression for the beginning point
+        x0 = self.var.x_sx[0,0,:]
+        self.x0 = {met : x_sx for met, x_sx in zip(self.boundary_species, x0)}
+
 
 
         

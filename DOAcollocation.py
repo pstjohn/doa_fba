@@ -194,14 +194,19 @@ class DOAcollocation(BaseCollocation):
         self.dxdt = cs.SXFunction('dxdt', [t,x,vb], [xdot])
 
         
-    def _initialize_variables(self, kkt):
-        """ Initialize the vector of unknowns """
+    def _initialize_variables(self, kkt, **kwargs):
+        """ Initialize the vector of unknowns. Additional variables can be
+        created (for use in a custom objective function, for instance) by
+        passing them as kwargs with a tuple of their shape. """
          
 
         core_variables = {
             'x'  : (self.nk, self.d+1, self.nx),
             'v'  : (self.nk, self.nv),
         }
+
+        # Handle passed kwargs
+        core_variables.update(kwargs)
 
         if self.tf == None: core_variables.update({'tf' : (1,)})
 
@@ -320,8 +325,10 @@ class DOAcollocation(BaseCollocation):
         # Get an expression for the endpoint for objective purposes
         xf = self.col_vars['D'].dot(cs.SX(self.var.x_sx[-1]))
         self.xf = {met : x_sx for met, x_sx in zip(self.boundary_species, xf)}
-        
 
+        # Similarly, get an expression for the beginning point
+        x0 = self.var.x_sx[0,0,:]
+        self.x0 = {met : x_sx for met, x_sx in zip(self.boundary_species, x0)}
 
 
     def _initialize_mass_balance(self):

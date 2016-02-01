@@ -33,17 +33,22 @@ class BaseCollocation(object):
             'lbx' : self.var.vars_lb,
             'ubx' : self.var.vars_ub,
 
-            'lbg' : np.concatenate(self.constraints_lb),
-            'ubg' : np.concatenate(self.constraints_ub),
+            'lbg' : self.col_vars['lbg'],
+            'ubg' : self.col_vars['ubg'],
 
             'p'   : alpha,
         }
+
 
         # Call the solver
         self._result = self._solver(arg)
 
         # Process the optimal vector
         self.var.vars_op = self._result['x']
+
+
+        # Store the optimal solution as initial vectors for the next go-around
+        self.var.vars_in = self.var.vars_op
 
         try: self._plot_setup()
         except AttributeError: pass
@@ -123,4 +128,52 @@ class BaseCollocation(object):
         
         if kwargs is not None: opts.update(kwargs)
 
-        self._solver = cs.NlpSolver("solver", "ipopt", self._nlp, opts)
+        self._solver_opts = opts
+
+        self._solver = cs.NlpSolver("solver", "ipopt", self._nlp,
+                                    self._solver_opts)
+
+        self.col_vars['lbg'] = np.concatenate(self.constraints_lb)
+        self.col_vars['ubg'] = np.concatenate(self.constraints_ub)
+
+    def warm_solve(self, alpha):
+
+        warm_solve_opts = dict(self._solver_opts)
+
+        warm_solve_opts["warm_start_init_point"] = "yes"
+        warm_solve_opts["warm_start_bound_push"] = 1e-6
+        warm_solve_opts["warm_start_slack_bound_push"] = 1e-6
+        warm_solve_opts["warm_start_mult_bound_push"] = 1e-6
+
+        solver = self._solver = cs.NlpSolver("solver", "ipopt", self._nlp,
+                                             warm_solve_opts)
+
+
+        solver.setInput(self.var.vars_in, 'x0')
+        solver.setInput(self.var.vars_lb, 'lbx')
+        solver.setInput(self.var.vars_ub, 'ubx')
+        solver.setInput(self.col_vars['lbg'], 'lbg')
+        solver.setInput(self.col_vars['ubg'], 'ubg')
+        solver.setInput(alpha, 'p')
+        solver.setInput(self._result['lam_x'], 'lam_x0')
+        solver.setInput(self._result['lam_g'], 'lam_g0')
+        solver.setOutput(self._result['lam_x'], "lam_x")
+
+        self._solver.evaluate()
+        self._result = {
+            'x' : self._solver.getOutput('x'),
+            'lam_x' : self._solver.getOutput('lam_x'),
+            'lam_g' : self._solver.getOutput('lam_g'),
+            'f' : self._solver.getOutput('f'),
+        }
+
+        # Process the optimal vector
+        self.var.vars_op = self._result['x']
+
+        # Store the optimal solution as initial vectors for the next go-around
+        self.var.vars_in = self.var.vars_op
+
+        try: self._plot_setup()
+        except AttributeError: pass
+
+        return float(self._result['f'])
