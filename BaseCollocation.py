@@ -136,8 +136,12 @@ class BaseCollocation(object):
         self.col_vars['lbg'] = np.concatenate(self.constraints_lb)
         self.col_vars['ubg'] = np.concatenate(self.constraints_ub)
 
-    def warm_solve(self, alpha):
+    def warm_solve(self, alpha, x0=None, lam_x=None, lam_g=None):
+        """Solve the collocation problem using an initial guess and basis from
+        a prior solve. Defaults to using the variables from the solve stored in
+        _results. 
 
+        """
         warm_solve_opts = dict(self._solver_opts)
 
         warm_solve_opts["warm_start_init_point"] = "yes"
@@ -149,15 +153,19 @@ class BaseCollocation(object):
                                              warm_solve_opts)
 
 
-        solver.setInput(self.var.vars_in, 'x0')
+        if x0 is None: x0 = self._result['x']
+        if lam_x is None: lam_x = self._result['lam_x']
+        if lam_g is None: lam_g = self._result['lam_g']
+
+        solver.setInput(x0, 'x0')
         solver.setInput(self.var.vars_lb, 'lbx')
         solver.setInput(self.var.vars_ub, 'ubx')
         solver.setInput(self.col_vars['lbg'], 'lbg')
         solver.setInput(self.col_vars['ubg'], 'ubg')
         solver.setInput(alpha, 'p')
-        solver.setInput(self._result['lam_x'], 'lam_x0')
-        solver.setInput(self._result['lam_g'], 'lam_g0')
-        solver.setOutput(self._result['lam_x'], "lam_x")
+        solver.setInput(lam_x, 'lam_x0')
+        solver.setInput(lam_g, 'lam_g0')
+        solver.setOutput(lam_x, "lam_x")
 
         self._solver.evaluate()
         self._result = {
