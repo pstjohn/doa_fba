@@ -2,11 +2,9 @@ import pandas as pd
 import numpy as np
 
 import casadi as cs
-import cobra
 
 from .VariableHandler import VariableHandler
 from .DOAcollocation import DOAcollocation
-import warnings
 
 class EFMcollocation(DOAcollocation):
 
@@ -88,17 +86,12 @@ class EFMcollocation(DOAcollocation):
                 if lb is not None:
                     self.col_vars['v_lb_sym'].loc[k, rxn] = lb
                     # self.var.v_lb.loc[k, rxn] = -1000
-                    self.constraints_sx.append(rxn_sx - lb)
-                    self.constraints_ub.append(np.array([cs.inf]))
-                    self.constraints_lb.append(np.array([0]))
+                    self.add_constraint(rxn_sx - lb, 0, cs.inf)
 
 
                 if ub is not None:
                     self.col_vars['v_ub_sym'].loc[k, rxn] = ub
-                    self.constraints_sx.append(ub - rxn_sx)
-                    self.constraints_ub.append(np.array([cs.inf]))
-                    self.constraints_lb.append(np.array([0]))
-                    # self.var.v_ub.loc[k, rxn] = +1000
+                    self.add_constraint(ub - rxn_sx, 0, cs.inf)
 
 
 
@@ -172,9 +165,7 @@ class EFMcollocation(DOAcollocation):
                     [T[k,j], cs.SX(self.var.x_sx[k,j]),
                      cs.SX(self.efms.T.dot(self.var.v_sx.loc[k]).values)])
 
-                self.constraints_sx.append(h*fk - xp_jk)
-                self.constraints_lb.append(np.zeros(self.nx))
-                self.constraints_ub.append(np.zeros(self.nx))
+                self.add_constraint(h*fk - xp_jk)
 
             # Add continuity equation to NLP
             if k+1 != self.nk:
@@ -183,9 +174,7 @@ class EFMcollocation(DOAcollocation):
                 # element
                 xf_k = self.col_vars['D'].dot(cs.SX(self.var.x_sx[k]))
 
-                self.constraints_sx.append(cs.SX(self.var.x_sx[k+1,0]) - xf_k)
-                self.constraints_lb.append(np.zeros(self.nx))
-                self.constraints_ub.append(np.zeros(self.nx))
+                self.add_constraint(cs.SX(self.var.x_sx[k+1,0]) - xf_k)
 
         # Get an expression for the endpoint for objective purposes
         xf = self.col_vars['D'].dot(cs.SX(self.var.x_sx[-1]))

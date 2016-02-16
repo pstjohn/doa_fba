@@ -124,17 +124,13 @@ class DOAcollocation(BaseCollocation):
                 if lb is not None:
                     self.col_vars['v_lb_sym'].loc[k, rxn] = lb
                     self.var.v_lb.loc[k, rxn] = -1000
-                    self.constraints_sx.append(rxn_sx - lb)
-                    self.constraints_ub.append(np.array([cs.inf]))
-                    self.constraints_lb.append(np.array([0]))
+                    self.add_constraint(rxn_sx - lb, 0, cs.inf)
 
 
                 if ub is not None:
                     self.col_vars['v_ub_sym'].loc[k, rxn] = ub
-                    self.constraints_sx.append(ub - rxn_sx)
-                    self.constraints_ub.append(np.array([cs.inf]))
-                    self.constraints_lb.append(np.array([0]))
                     self.var.v_ub.loc[k, rxn] = +1000
+                    self.add_constraint(ub - rxn_sx, 0, cs.inf)
 
 
     def initialize(self, **kwargs):
@@ -307,9 +303,7 @@ class DOAcollocation(BaseCollocation):
                     [T[k,j], cs.SX(self.var.x_sx[k,j]),
                      cs.SX(self.var.v_sx.loc[k, self.boundary_rxns].values)])
 
-                self.constraints_sx.append(h*fk - xp_jk)
-                self.constraints_lb.append(np.zeros(self.nx))
-                self.constraints_ub.append(np.zeros(self.nx))
+                self.add_constraint(h*fk - xp_jk)
 
             # Add continuity equation to NLP
             if k+1 != self.nk:
@@ -318,9 +312,7 @@ class DOAcollocation(BaseCollocation):
                 # element
                 xf_k = self.col_vars['D'].dot(cs.SX(self.var.x_sx[k]))
 
-                self.constraints_sx.append(cs.SX(self.var.x_sx[k+1,0]) - xf_k)
-                self.constraints_lb.append(np.zeros(self.nx))
-                self.constraints_ub.append(np.zeros(self.nx))
+                self.add_constraint(cs.SX(self.var.x_sx[k+1,0]) - xf_k)
 
         # Get an expression for the endpoint for objective purposes
         xf = self.col_vars['D'].dot(cs.SX(self.var.x_sx[-1]))
@@ -336,10 +328,7 @@ class DOAcollocation(BaseCollocation):
         element """
 
         mass_balance = self.model.S.dot(self.var.v_sx.T).values.flatten()
-        self.constraints_sx += mass_balance.tolist()
-        self.constraints_lb.append(np.zeros(self.nk * self.nm))
-        self.constraints_ub.append(np.zeros(self.nk * self.nm))
-
+        self.add_constraint(mass_balance.tolist())
 
 
     def _initialize_kkt_constraints(self):
@@ -355,27 +344,19 @@ class DOAcollocation(BaseCollocation):
         kkt_mul1 = (self.model.objectives + 
                     self.model.S.T.dot(self.var.Lambda_sx.T).T + 
                     self.var.alphaL_sx - self.var.alphaU_sx)
-        self.constraints_sx += kkt_mul1.values.flatten().tolist()
-        self.constraints_lb.append(np.zeros(self.nk * self.nv))
-        self.constraints_ub.append(np.zeros(self.nk * self.nv))
+        self.add_constraint(kkt_mul1.values.flatten().tolist())
 
         kkt_mul2 = self.var.Lambda_sx - self.var.etaL_sx + self.var.etaU_sx
-        self.constraints_sx += kkt_mul2.flatten().tolist()
-        self.constraints_lb.append(np.zeros(self.nk * self.nm))
-        self.constraints_ub.append(np.zeros(self.nk * self.nm))
+        self.add_constraint(kkt_mul2.flatten().tolist())
 
         # Complimentarity constraints
         compL = ((self.var.v_sx - self.col_vars['v_lb_sym']) *
                  self.var.alphaL_sx)
-        self.constraints_sx += compL.values.flatten().tolist()
-        self.constraints_lb.append(np.zeros(self.nk * self.nv))
-        self.constraints_ub.append(np.zeros(self.nk * self.nv))
+        self.add_constraint(compL.values.flatten().tolist())
 
         compU = ((self.col_vars['v_ub_sym'] - self.var.v_sx) *
                  self.var.alphaU_sx)
-        self.constraints_sx += compU.values.flatten().tolist()
-        self.constraints_lb.append(np.zeros(self.nk * self.nv))
-        self.constraints_ub.append(np.zeros(self.nk * self.nv))
+        self.add_constraint(compU.values.flatten().tolist())
 
 
     def _initialize_mav_objective(self):

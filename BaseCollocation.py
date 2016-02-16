@@ -15,10 +15,52 @@ class BaseCollocation(object):
         
         # Initialize container variables
         self.col_vars = {}
-        self.constraints_sx = []
-        self.constraints_lb = []
-        self.constraints_ub = []
+        self._constraints_sx = []
+        self._constraints_lb = []
+        self._constraints_ub = []
         self.objective_sx = 0.
+
+    def add_constraint(self, sx, lb=None, ub=None):
+        """ Add a constraint to the problem. sx should be a casadi symbolic
+        variable, lb and ub should be the same length. If not given, upper and
+        lower bounds default to 0. 
+
+        Replaces manual addition of constraint variables to allow for warnings
+        to be issues when a constraint that returns 'nan' with the current
+        initalized variables is added.
+
+        """
+
+        constraint_len = sx.shape[0]
+        assert sx.shape[1] == 1, "SX shape {} mismatch".format(sx.shape)
+
+        if lb is None: lb = np.zeros(constraint_len)
+        else: lb = np.atleast_1d(np.asarray(lb))
+
+        if ub is None: ub = np.zeros(constraint_len)
+        else: ub = np.atleast_1d(np.asarray(ub))
+
+        # Make sure the bounds are sensible
+        assert len(lb) == constraint_len, "LB length mismatch"
+        assert len(ub) == constraint_len, "UB length mismatch"
+        assert np.all(lb <= ub), "LB ! <= UB"
+
+        try:
+            gfcn = cs.SXFunction('g test',
+                                 [self.var.vars_sx, self.col_vars['alpha']],
+                                 [sx])
+            out = np.asarray(gfcn([self.var.vars_in, 1.])[0])
+            if np.any(np.isnan(out)):
+                raise RuntimeWarning('Constraint gives NAN with default input '
+                                     'arguments')
+        
+        except (AttributeError, KeyError):
+            pass
+
+        self._constraints_sx.append(sx)
+        self._constraints_lb.append(lb)
+        self._constraints_ub.append(ub)
+
 
 
     def solve(self, alpha=0.):
@@ -119,7 +161,7 @@ class BaseCollocation(object):
             cs.nlpIn(x = self.var.vars_sx,
                      p = self.col_vars['alpha']),
             cs.nlpOut(f = self.objective_sx, 
-                      g = cs.vertcat(self.constraints_sx)))
+                      g = cs.vertcat(self._constraints_sx)))
 
         opts = {
             'max_iter' : 10000,
@@ -133,8 +175,8 @@ class BaseCollocation(object):
         self._solver = cs.NlpSolver("solver", "ipopt", self._nlp,
                                     self._solver_opts)
 
-        self.col_vars['lbg'] = np.concatenate(self.constraints_lb)
-        self.col_vars['ubg'] = np.concatenate(self.constraints_ub)
+        self.col_vars['lbg'] = np.concatenate(self._constraints_lb)
+        self.col_vars['ubg'] = np.concatenate(self._constraints_ub)
 
     def warm_solve(self, alpha, x0=None, lam_x=None, lam_g=None):
         """Solve the collocation problem using an initial guess and basis from
