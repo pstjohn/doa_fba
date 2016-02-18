@@ -56,7 +56,7 @@ class EFMcollocation(BaseCollocation):
             self.boundary_rxns += [rxns[0].id]
 
         # Assure that efms are in the correct order
-        self.efms = efms.loc[:, self.boundary_rxns]
+        self.efms = pd.DataFrame(efms.loc[:, self.boundary_rxns], dtype=object)
 
         super(EFMcollocation, self).__init__()
 
@@ -133,7 +133,7 @@ class EFMcollocation(BaseCollocation):
 
             for met, boundary_func in constraint_dictionary.iteritems():
                 rxn = self.boundary_rxns[self.boundary_species.index(met)]
-                rxn_sx = self.efms.loc[:, rxn].dot(self.var.v_sx.loc[k])
+                rxn_sx = self.efms.loc[:, rxn].dot(self.var.v_sx[k])
                 lb, ub = boundary_func(x)
 
                 if lb is not None:
@@ -168,7 +168,7 @@ class EFMcollocation(BaseCollocation):
 
         if self.tf == None: core_variables.update({'tf' : (1,)})
 
-        self.var = VariableHandler(core_variables, self.efms.index.values)
+        self.var = VariableHandler(core_variables)
 
         # Initialize default variable bounds
         self.var.x_lb[:] = 0.
@@ -231,7 +231,7 @@ class EFMcollocation(BaseCollocation):
                 # coefficients in V by the efm matrix
                 [fk] = self.dxdt.call(
                     [T[k,j], cs.SX(self.var.x_sx[k,j]),
-                     cs.SX(self.efms.T.dot(self.var.v_sx.loc[k]).values)])
+                     cs.SX(self.efms.T.dot(self.var.v_sx[k]).values)])
 
                 self.add_constraint(h*fk - xp_jk)
 
@@ -258,7 +258,7 @@ class EFMcollocation(BaseCollocation):
         the flux vector """
 
         self.objective_sx += (self.col_vars['alpha'] *
-                              cs.fabs(self.var.v_sx).values.sum())
+                              cs.fabs(self.var.v_sx).sum())
 
 
     def _plot_optimal_fluxes(self, ax):

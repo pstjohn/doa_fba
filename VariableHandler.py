@@ -6,7 +6,7 @@ import casadi as cs
 
 class VariableHandler(object):
 
-    def __init__(self, shape_dict, rxn_ids=None):
+    def __init__(self, shape_dict):
         """ A class to handle the flattening and expanding of the NLP variable
         vector. Solves a lot of headaches.
 
@@ -15,7 +15,6 @@ class VariableHandler(object):
         
         """
 
-        self._rxn_ids = rxn_ids
         self._data = pd.DataFrame(pd.Series(shape_dict), columns=['shapes'])
 
         from operator import mul
@@ -35,25 +34,13 @@ class VariableHandler(object):
         symbolic_dict = self._expand(self.vars_sx)
 
         for key, row in self._data.iterrows():
-            if key == 'v':
-                self.__dict__.update(
-        {
-            key + '_lb' : pd.DataFrame(np.zeros(row.shapes), columns=rxn_ids),
-            key + '_ub' : pd.DataFrame(np.zeros(row.shapes), columns=rxn_ids),
-            key + '_in' : pd.DataFrame(np.zeros(row.shapes), columns=rxn_ids),
-            key + '_op' : pd.DataFrame(np.zeros(row.shapes), columns=rxn_ids),
-            key + '_sx' : symbolic_dict[key],
-        }
-                )
-
-            else: 
-                self.__dict__.update({
-                    key + '_lb' : np.zeros(row.shapes), # Lower bounds
-                    key + '_ub' : np.zeros(row.shapes), # Upper bounds
-                    key + '_in' : np.zeros(row.shapes), # Initial guess
-                    key + '_op' : np.zeros(row.shapes), # Optimized Value
-                    key + '_sx' : symbolic_dict[key],
-                })
+            self.__dict__.update({
+                key + '_lb' : np.zeros(row.shapes), # Lower bounds
+                key + '_ub' : np.zeros(row.shapes), # Upper bounds
+                key + '_in' : np.zeros(row.shapes), # Initial guess
+                key + '_op' : np.zeros(row.shapes), # Optimized Value
+                key + '_sx' : symbolic_dict[key],
+            })
 
 
     @property
@@ -119,12 +106,7 @@ class VariableHandler(object):
         assert len(vector) == self._total_length, "expand length mismatch"
 
         def reshape_slice(row, key):
-            if key == 'v':
-                return pd.DataFrame(
-                    vector[row.start:row.end].reshape(row.shapes),
-                    columns=self._rxn_ids)
-            else:
-                return vector[row.start:row.end].reshape(row.shapes)
+            return vector[row.start:row.end].reshape(row.shapes)
 
         return pd.Series([reshape_slice(row, key) for key, row in
                           self._data.iterrows()], index = self._data.index)
