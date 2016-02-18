@@ -56,7 +56,8 @@ class EFMcollocation(BaseCollocation):
             self.boundary_rxns += [rxns[0].id]
 
         # Assure that efms are in the correct order
-        self.efms = pd.DataFrame(efms.loc[:, self.boundary_rxns], dtype=object)
+        self.efms_float = efms.loc[:, self.boundary_rxns]
+        self.efms_object = pd.DataFrame(self.efms_float, dtype=object)
 
         super(EFMcollocation, self).__init__()
 
@@ -94,7 +95,7 @@ class EFMcollocation(BaseCollocation):
         ax[0].legend(lines, self.boundary_species[1:], loc='upper left', ncol=2)
     
         # Plot the optimal fluxes
-        self._plot_optimal_fluxes(ax[1])
+        self._plot_optimal_rates(ax[1])
 
         # Plot the biomass results
         lines = ax[2].plot(self.ts, self.sol[:,0], '.--')
@@ -124,27 +125,25 @@ class EFMcollocation(BaseCollocation):
         for key in constraint_dictionary.iterkeys():
             assert key in self.boundary_species, "{} not found".format(key)
 
-        # Iterate over each finite element
+        # Iterate over each point
         for k in xrange(self.nk):
+            for j in xrange(1, self.d+1):
             
-            # Create a dictionary to pass to the bounds functions
-            x = {met : var_sx for met, var_sx in 
-                 zip(self.boundary_species, self.var.x_sx[k,0])}
+                # Create a dictionary to pass to the bounds functions
+                x = {met : var_sx for met, var_sx in 
+                     zip(self.boundary_species, self.var.x_sx[k,j])}
 
-            for met, boundary_func in constraint_dictionary.iteritems():
-                rxn = self.boundary_rxns[self.boundary_species.index(met)]
-                rxn_sx = self.efms.loc[:, rxn].dot(self.var.v_sx[k])
-                lb, ub = boundary_func(x)
+                for met, boundary_func in constraint_dictionary.iteritems():
+                    rxn_sx = self._get_symbolic_flux(k, j)[
+                        self.boundary_species.index(met)]
+                    lb, ub = boundary_func(x)
 
-                if lb is not None:
-                    self.col_vars['v_lb_sym'].loc[k, rxn] = lb
-                    # self.var.v_lb.loc[k, rxn] = -1000
-                    self.add_constraint(rxn_sx - lb, 0, cs.inf)
+                    if lb is not None:
+                        self.add_constraint(rxn_sx - lb, 0, cs.inf)
 
 
-                if ub is not None:
-                    self.col_vars['v_ub_sym'].loc[k, rxn] = ub
-                    self.add_constraint(ub - rxn_sx, 0, cs.inf)
+                    if ub is not None:
+                        self.add_constraint(ub - rxn_sx, 0, cs.inf)
 
     def _initialize_dynamic_model(self):
         """ Initialize the model of biomass growth and substrate accumulation
@@ -162,8 +161,8 @@ class EFMcollocation(BaseCollocation):
 
         core_variables = {
             'x'  : (self.nk, self.d+1, self.nx),
-            'v'  : (self.nk, self.nv),
-            # 'a'  : (self.nk, self.d+1),
+            'v'  : (1, self.nv),
+            'a'  : (self.nk, self.d),
         }
 
         if self.tf == None: core_variables.update({'tf' : (1,)})
@@ -176,30 +175,30 @@ class EFMcollocation(BaseCollocation):
 
         # Initialize EFM bounds. EFMs are nonnegative.
         self.var.v_lb[:] = 0.
-        self.var.v_ub[:] = cs.inf
+        self.var.v_ub[:] = 1.
         self.var.v_in[:] = 0.
 
         # Activity polynomial.
-        # self.var.a_lb[:] = 0.
-        # self.var.a_ub[:] = np.inf
-        # self.var.a_in[:] = 1.
+        self.var.a_lb[:] = 0.
+        self.var.a_ub[:] = np.inf
+        self.var.a_in[:] = 1.
 
         if self.tf == None:
             self.var.tf_lb[:] = 1.
             self.var.tf_ub[:] = 100.
             self.var.tf_in[:] = 10.
 
-        # Initialize symbolic upper and lower bound flux arrays to hold
-        # boundary fluxes
-        self.col_vars['v_lb_sym'] = pd.DataFrame(
-            np.empty((self.nk, self.nx), dtype=object),
-            columns=self.boundary_rxns)
-        self.col_vars['v_ub_sym'] = pd.DataFrame(
-            np.empty((self.nk, self.nx), dtype=object),
-            columns=self.boundary_rxns)
+        # We also want the v_sx variable to represent a fraction of the overall
+        # efm, so we'll add a constraint saying the sum of the variable must
+        # equal 1.
+        self.add_constraint(self.var.v_sx.sum(), 1., 1.)
 
     def _get_symbolic_flux(self, finite_element, degree):
-        return cs.SX(self.efms.T.dot(self.var.v_sx[finite_element]).values) 
+
+        return cs.SX(self.efms_object.T.dot((
+            np.asarray(self.var.a_sx[finite_element, degree-1], dtype=object) * 
+            np.asarray(self.var.v_sx[0], dtype=object)
+        ).flatten()).values) 
 
     def _initialize_polynomial_constraints(self):
         """ Add constraints to the model to account for system dynamics and
@@ -264,9 +263,18 @@ class EFMcollocation(BaseCollocation):
                               cs.fabs(self.var.v_sx).sum())
 
 
-    def _plot_optimal_fluxes(self, ax):
-        active_fluxes = self.var.v_op.max(0) > 1E-4
-        ax.step(self.fs, self.var.v_op[:, active_fluxes])
+    def _plot_optimal_rates(self, ax):
+
+        vs = np.zeros((self.nk, self.d, self.nv))
+        for k in xrange(self.nk):
+            for j in xrange(1, self.d+1):
+                vs[k,j-1,:] = self.var.a_op[k, j-1] * self.var.v_op[0]
+
+        vs_flat = vs.reshape((self.nk*(self.d)), self.nv)
+        active_fluxes = vs_flat.sum(0) > 1E-4
+
+        ax.plot(self.col_vars['tgrid'][:,1:].flatten(), 
+                vs_flat[:, active_fluxes], '.--')
 
     def _plot_setup(self):
 
@@ -277,11 +285,11 @@ class EFMcollocation(BaseCollocation):
             h = self.tf / self.nk
 
         self.fs = h * np.arange(self.nk)
-        self.ts = np.array(
-            [point + h*np.array(self.col_vars['tau_root']) for point in 
-             np.linspace(0, h * self.nk, self.nk,
-                         endpoint=False)]).flatten()
+        self.col_vars['tgrid'] = np.array(
+            [point + h*np.array(self.col_vars['tau_root']) for point in
+             np.linspace(0, h * self.nk, self.nk, endpoint=False)])
 
+        self.ts = self.col_vars['tgrid'].flatten()
         self.sol = self.var.x_op.reshape((self.nk*(self.d+1)), self.nx)
         
         
