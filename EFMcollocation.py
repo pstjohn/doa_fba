@@ -198,6 +198,9 @@ class EFMcollocation(BaseCollocation):
             np.empty((self.nk, self.nx), dtype=object),
             columns=self.boundary_rxns)
 
+    def _get_symbolic_flux(self, finite_element, degree):
+        return cs.SX(self.efms.T.dot(self.var.v_sx[finite_element]).values) 
+
     def _initialize_polynomial_constraints(self):
         """ Add constraints to the model to account for system dynamics and
         continuity constraints """
@@ -231,7 +234,7 @@ class EFMcollocation(BaseCollocation):
                 # coefficients in V by the efm matrix
                 [fk] = self.dxdt.call(
                     [T[k,j], cs.SX(self.var.x_sx[k,j]),
-                     cs.SX(self.efms.T.dot(self.var.v_sx[k]).values)])
+                     self._get_symbolic_flux(k, j)])
 
                 self.add_constraint(h*fk - xp_jk)
 
@@ -263,7 +266,7 @@ class EFMcollocation(BaseCollocation):
 
     def _plot_optimal_fluxes(self, ax):
         active_fluxes = self.var.v_op.max(0) > 1E-4
-        ax.step(self.fs, self.var.v_op.loc[:, active_fluxes])
+        ax.step(self.fs, self.var.v_op[:, active_fluxes])
 
     def _plot_setup(self):
 
