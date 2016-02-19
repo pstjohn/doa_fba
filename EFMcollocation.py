@@ -1,3 +1,5 @@
+import bisect
+
 import pandas as pd
 import numpy as np
 
@@ -9,7 +11,7 @@ from .BaseCollocation import BaseCollocation
 
 class EFMcollocation(BaseCollocation):
 
-    def __init__(self, model, boundary_species, efms):
+    def __init__(self, model, boundary_species, efms, stage_breakdown):
         """ A class to handle the dynamic optimization based method of dynamic
         flux analysis from [1].
 
@@ -26,21 +28,26 @@ class EFMcollocation(BaseCollocation):
             efms should be a dataframe containing compressed, boundary EFMs
             (with EFMs as columns) 
 
+        stage_breakdown: list of ints
+            Describes the number of finite elements to allocate to each of `n`
+            fermentation divisions. The number of allowed fermentation
+            divisions will be implicitly stated by the length of the passed
+            list.
 
         """
 
         self.model = cobra.core.DataframeBasedModel(model)
-        # self.model.optimize(minimize_absolute_flux=1.0)
 
         self.nx = len(boundary_species)
         self.nv = efms.shape[0]
         self.nm = len(self.model.metabolites)
-
-        # If tf is left as None, it will be a symbolic variable
-        self.tf = None
+        self.nf = len(stage_breakdown)
 
         assert self.nx == efms.shape[1], "EFMs are the wrong shape"
         
+        # store stage breakdowns
+        self.stage_breakdown = stage_breakdown
+
         # Handle boundary reactions
         self.boundary_species = boundary_species
         all_boundary_rxns = model.reactions.query('system_boundary', 'boundary')
@@ -60,6 +67,11 @@ class EFMcollocation(BaseCollocation):
         self.efms_object = pd.DataFrame(self.efms_float, dtype=object)
 
         super(EFMcollocation, self).__init__()
+
+        # The finite element count must be set after initializing the base
+        # class.
+        self.nk = sum(stage_breakdown)
+
 
     def setup(self, mav=False):
         """ Set up the collocation framework """
@@ -161,11 +173,10 @@ class EFMcollocation(BaseCollocation):
 
         core_variables = {
             'x'  : (self.nk, self.d+1, self.nx),
-            'v'  : (1, self.nv),
+            'v'  : (self.nf, self.nv),
             'a'  : (self.nk, self.d),
+            'h'  : (self.nf),
         }
-
-        if self.tf == None: core_variables.update({'tf' : (1,)})
 
         self.var = VariableHandler(core_variables)
 
@@ -183,37 +194,46 @@ class EFMcollocation(BaseCollocation):
         self.var.a_ub[:] = np.inf
         self.var.a_in[:] = 1.
 
-        if self.tf == None:
-            self.var.tf_lb[:] = 1.
-            self.var.tf_ub[:] = 100.
-            self.var.tf_in[:] = 10.
+        # Stage stepsize control (in hours)
+        self.var.h_lb[:] = .1
+        self.var.h_ub[:] = 10.
+        self.var.h_in[:] = 1.
+
+
+        # Maintain compatibility with codes using a symbolic final time
+        self.var.tf_sx = sum([self.var.h_sx[i] * self.stage_breakdown[i]
+                              for i in xrange(self.nf)])
+
 
         # We also want the v_sx variable to represent a fraction of the overall
         # efm, so we'll add a constraint saying the sum of the variable must
         # equal 1.
-        self.add_constraint(self.var.v_sx.sum(), 1., 1.)
+        self.add_constraint(cs.SX(self.var.v_sx.sum(1)), np.ones(self.nf),
+                            np.ones(self.nf))
+
+    def _get_stage_index(self, finite_element):
+        """ Find the current stage based on the indexed finite_element """
+        return bisect.bisect(np.cumsum(self.stage_breakdown), finite_element)
 
     def _get_symbolic_flux(self, finite_element, degree):
+        """ Get a symbolic expression for the boundary fluxes at the given
+        finite_element and polynomial degree """
 
         return cs.SX(self.efms_object.T.dot((
             np.asarray(self.var.a_sx[finite_element, degree-1], dtype=object) * 
-            np.asarray(self.var.v_sx[0], dtype=object)
-        ).flatten()).values) 
+            np.asarray(self.var.v_sx[self._get_stage_index(finite_element)],
+                       dtype=object)).flatten()).values) 
 
     def _initialize_polynomial_constraints(self):
         """ Add constraints to the model to account for system dynamics and
         continuity constraints """
 
-        if self.tf == None:
-            h = self.var.tf_sx / self.nk
-        else:
-            h = self.tf / self.nk
-
         # All collocation time points
         T = np.zeros((self.nk, self.d+1), dtype=object)
         for k in range(self.nk):
             for j in range(self.d+1):
-                T[k,j] = h*(k + self.col_vars['tau_root'][j])
+                T[k,j] = (self.var.h_sx[self._get_stage_index(k)] * 
+                          (k + self.col_vars['tau_root'][j]))
 
 
         # For all finite elements
@@ -235,7 +255,8 @@ class EFMcollocation(BaseCollocation):
                     [T[k,j], cs.SX(self.var.x_sx[k,j]),
                      self._get_symbolic_flux(k, j)])
 
-                self.add_constraint(h*fk - xp_jk)
+                self.add_constraint(
+                    self.var.h_sx[self._get_stage_index(k)] * fk - xp_jk)
 
             # Add continuity equation to NLP
             if k+1 != self.nk:
@@ -260,7 +281,7 @@ class EFMcollocation(BaseCollocation):
         the flux vector """
 
         self.objective_sx += (self.col_vars['alpha'] *
-                              cs.fabs(self.var.v_sx).sum())
+                              cs.fabs(self.var.a_sx).sum())
 
 
     def _plot_optimal_rates(self, ax):
@@ -268,26 +289,29 @@ class EFMcollocation(BaseCollocation):
         vs = np.zeros((self.nk, self.d, self.nv))
         for k in xrange(self.nk):
             for j in xrange(1, self.d+1):
-                vs[k,j-1,:] = self.var.a_op[k, j-1] * self.var.v_op[0]
+                vs[k,j-1,:] = (self.var.a_op[k, j-1] *
+                               self.var.v_op[self._get_stage_index(k)])
 
         vs_flat = vs.reshape((self.nk*(self.d)), self.nv)
-        active_fluxes = vs_flat.sum(0) > 1E-4
+        vs_sum = vs_flat.sum(0) 
+        active_fluxes = vs_sum > 1E-2 * vs_sum.max()
 
         ax.plot(self.col_vars['tgrid'][:,1:].flatten(), 
                 vs_flat[:, active_fluxes], '.--')
 
     def _plot_setup(self):
 
-        # Create vectors from optimized time and states
-        if self.tf == None:
-            h = self.var.tf_op / self.nk
-        else: 
-            h = self.tf / self.nk
+        self.var.tf_op = sum([self.var.h_op[i] * self.stage_breakdown[i]
+                              for i in xrange(self.nf)])
 
-        self.fs = h * np.arange(self.nk)
+        stage_starts = np.hstack(
+            [np.array(0.), np.cumsum([self.var.h_op[self._get_stage_index(k)]
+                                      for k in xrange(self.nk - 1)])])
+
         self.col_vars['tgrid'] = np.array(
-            [point + h*np.array(self.col_vars['tau_root']) for point in
-             np.linspace(0, h * self.nk, self.nk, endpoint=False)])
+            [start + self.var.h_op[self._get_stage_index(k)] *
+             np.array(self.col_vars['tau_root']) for k, start in
+             enumerate(stage_starts)])
 
         self.ts = self.col_vars['tgrid'].flatten()
         self.sol = self.var.x_op.reshape((self.nk*(self.d+1)), self.nx)
