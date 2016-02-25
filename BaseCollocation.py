@@ -46,7 +46,7 @@ class BaseCollocation(object):
 
         try:
             gfcn = cs.SXFunction('g test',
-                                 [self.var.vars_sx, self.col_vars['alpha']],
+                                 [self.var.vars_sx, self.pvar.vars_sx],
                                  [sx])
             out = np.asarray(gfcn([self.var.vars_in, 1.])[0])
             if np.any(np.isnan(out)):
@@ -62,7 +62,7 @@ class BaseCollocation(object):
 
 
 
-    def solve(self, alpha=0.):
+    def solve(self):
         """ Solve the NLP. Alpha specifies the value for the regularization
         parameter, which minimizes the sum |v|.
 
@@ -77,7 +77,7 @@ class BaseCollocation(object):
             'lbg' : self.col_vars['lbg'],
             'ubg' : self.col_vars['ubg'],
 
-            'p'   : alpha,
+            'p'   : self.pvar.vars_in,
         }
 
 
@@ -150,7 +150,6 @@ class BaseCollocation(object):
             Phi[j] = np.asarray(tau_integrator({'x0' : 0})['xf'])[0][0]
 
         self.col_vars['Phi'] = np.array(Phi)
-        self.col_vars['alpha'] = cs.SX.sym('alpha')
         
     def _initialize_solver(self, **kwargs):
 
@@ -158,7 +157,7 @@ class BaseCollocation(object):
         self._nlp = cs.SXFunction(
             'nlp', 
             cs.nlpIn(x = self.var.vars_sx,
-                     p = self.col_vars['alpha']),
+                     p = self.pvar.vars_sx),
             cs.nlpOut(f = self.objective_sx, 
                       g = cs.vertcat(self._constraints_sx)))
 
@@ -177,7 +176,7 @@ class BaseCollocation(object):
         self.col_vars['lbg'] = np.concatenate(self._constraints_lb)
         self.col_vars['ubg'] = np.concatenate(self._constraints_ub)
 
-    def warm_solve(self, alpha, x0=None, lam_x=None, lam_g=None):
+    def warm_solve(self, x0=None, lam_x=None, lam_g=None):
         """Solve the collocation problem using an initial guess and basis from
         a prior solve. Defaults to using the variables from the solve stored in
         _results. 
@@ -203,7 +202,7 @@ class BaseCollocation(object):
         solver.setInput(self.var.vars_ub, 'ubx')
         solver.setInput(self.col_vars['lbg'], 'lbg')
         solver.setInput(self.col_vars['ubg'], 'ubg')
-        solver.setInput(alpha, 'p')
+        solver.setInput(self.pvar.vars_in, 'p')
         solver.setInput(lam_x, 'lam_x0')
         solver.setInput(lam_g, 'lam_g0')
         solver.setOutput(lam_x, "lam_x")

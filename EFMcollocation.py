@@ -73,7 +73,7 @@ class EFMcollocation(BaseCollocation):
         self.nk = sum(stage_breakdown)
 
 
-    def setup(self, mav=False):
+    def setup(self):
         """ Set up the collocation framework """
 
         self._initialize_dynamic_model()
@@ -81,19 +81,15 @@ class EFMcollocation(BaseCollocation):
         self._initialize_variables()
         self._initialize_polynomial_constraints()
 
-        self.col_vars['mav'] = mav
-
     def initialize(self, **kwargs):
         """ Call after setting up boundary kinetics, finalizes the
         initialization and sets up the NLP problem. Keyword arguments are
         passed directly as options to the NLP solver """
 
-        if self.col_vars['mav']: self._initialize_mav_objective()
         self._initialize_solver(**kwargs)
 
     def plot_optimal(self):
         """ Method to quickly plot an optimal solution. """
-
 
         import matplotlib.pyplot as plt
         import seaborn as sns
@@ -211,6 +207,9 @@ class EFMcollocation(BaseCollocation):
         self.add_constraint(cs.SX(self.var.v_sx.sum(1)), np.ones(self.nf),
                             np.ones(self.nf))
 
+
+        self.pvar = VariableHandler({})
+
     def _get_stage_index(self, finite_element):
         """ Find the current stage based on the indexed finite_element """
         return bisect.bisect(np.cumsum(self.stage_breakdown), finite_element)
@@ -274,14 +273,6 @@ class EFMcollocation(BaseCollocation):
         # Similarly, get an expression for the beginning point
         x0 = self.var.x_sx[0,0,:]
         self.x0 = {met : x_sx for met, x_sx in zip(self.boundary_species, x0)}
-
-
-    def _initialize_mav_objective(self):
-        """ Initialize the objective function to minimize the absolute value of
-        the flux vector """
-
-        self.objective_sx += (self.col_vars['alpha'] *
-                              cs.fabs(self.var.a_sx).sum())
 
 
     def _plot_optimal_rates(self, ax):
