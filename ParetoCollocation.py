@@ -1,6 +1,10 @@
 import numpy as np
 import pandas as pd
-from progressbar import ProgressBar
+
+try:
+    import progressbar
+except ImportError:
+    progressbar = False
 
 from .VariableHandler import VariableHandler
 from .EFMcollocation import EFMcollocation
@@ -38,15 +42,17 @@ class ParetoCollocation(EFMcollocation):
         # Container to hold output of reduce_function
         out = {}
 
-        with ProgressBar(max_value=len(xs)) as bar:
-            for i, x in enumerate(xs):
-                try:
-                    if i == 0: self.solve(x)
-                    else: self.warm_solve(x)
-                    out[x] = reduce_function(self)
-                except RuntimeWarning:
-                    out[x] = np.nan
+        if progressbar:
+            bar = progressbar.ProgressBar(max_value=len(xs))
 
-                bar.update(i)
+        for i, x in enumerate(xs):
+            try:
+                if i == 0: self.solve(x)
+                else: self.warm_solve(x)
+                out[x] = reduce_function(self)
+            except RuntimeWarning:
+                out[x] = np.nan
+
+            if progressbar: bar.update(i)
 
         return pd.DataFrame(out).T
