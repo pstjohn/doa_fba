@@ -40,9 +40,13 @@ class ParetoCollocation(EFMcollocation):
 
         with ProgressBar(max_value=len(xs)) as bar:
             for i, x in enumerate(xs):
-                if i == 0: self.solve(x)
-                else: self.warm_solve(x)
-                out[x] = reduce_function(self)
+                try:
+                    if i == 0: self.solve(x)
+                    else: self.warm_solve(x)
+                    out[x] = reduce_function(self)
+                except RuntimeWarning:
+                    out[x] = np.nan
+
                 bar.update(i)
 
         return pd.DataFrame(out).T
