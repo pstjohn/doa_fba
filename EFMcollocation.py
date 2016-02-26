@@ -108,6 +108,8 @@ class EFMcollocation(BaseCollocation):
         # Plot the biomass results
         lines = ax[2].plot(self.ts, self.sol[:,0], '.--')
         ax[2].legend(lines, self.boundary_species, loc='upper left', ncol=2)
+        ylim = ax[2].get_ylim()
+        ax[2].set_ylim([0, ylim[1]])
 
         plt.show()
 
@@ -263,7 +265,6 @@ class EFMcollocation(BaseCollocation):
                 # Get an expression for the state at the end of the finite
                 # element
                 xf_k = self.col_vars['D'].dot(cs.SX(self.var.x_sx[k]))
-
                 self.add_constraint(cs.SX(self.var.x_sx[k+1,0]) - xf_k)
 
         # Get an expression for the endpoint for objective purposes
@@ -287,8 +288,25 @@ class EFMcollocation(BaseCollocation):
         vs_sum = vs_flat.sum(0) 
         active_fluxes = vs_sum > 1E-2 * vs_sum.max()
 
-        ax.plot(self.col_vars['tgrid'][:,1:].flatten(), 
-                vs_flat[:, active_fluxes], '.--')
+        def build_rxn_string(efm):
+            efm = efm.copy()
+            efm /= -efm[efm < -1E-6].sum()
+            efm.index = efm.index.str.replace('_e', '').str.replace('EX_', '')
+            reactants = efm[efm < -1E-2]
+            products = efm[efm > 1E-2]
+            reactant_bits = ' + '.join(['{:0.2f} {}'.format(-stoich, name) for
+                                        name, stoich in reactants.iteritems()])
+            product_bits = ' + '.join(['{:0.2f} {}'.format(stoich, name) for
+                                       name, stoich in products.iteritems()])
+            return reactant_bits + ' --> ' + product_bits
+    
+        rxn_strings = [build_rxn_string(efm) for name, efm in
+                       self.efms_float[active_fluxes].T.iteritems()]
+
+        lines = ax.plot(self.col_vars['tgrid'][:,1:].flatten(), 
+                        vs_flat[:, active_fluxes], '.--')
+
+        ax.legend(lines, rxn_strings, loc='upper right')
 
     def _plot_setup(self):
 

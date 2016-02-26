@@ -84,6 +84,10 @@ class BaseCollocation(object):
         # Call the solver
         self._result = self._solver(arg)
 
+        if self._solver.getStat('return_status') != 'Solve_Succeeded':
+            raise RuntimeWarning('Solve status: {}'.format(
+                self._solver.getStat('return_status')))
+
         # Process the optimal vector
         self.var.vars_op = self._result['x']
 
@@ -208,6 +212,11 @@ class BaseCollocation(object):
         solver.setOutput(lam_x, "lam_x")
 
         self._solver.evaluate()
+
+        if self._solver.getStat('return_status') != 'Solve_Succeeded':
+            raise RuntimeWarning('Solve status: {}'.format(
+                self._solver.getStat('return_status')))
+
         self._result = {
             'x' : self._solver.getOutput('x'),
             'lam_x' : self._solver.getOutput('lam_x'),
