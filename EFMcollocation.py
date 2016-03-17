@@ -43,7 +43,7 @@ class EFMcollocation(BaseCollocation):
         self.nm = len(self.model.metabolites)
         self.nf = len(stage_breakdown)
 
-        assert self.nx == efms.shape[1], "EFMs are the wrong shape"
+        # assert self.nx == efms.shape[1], "EFMs are the wrong shape"
         
         # store stage breakdowns
         self.stage_breakdown = stage_breakdown
@@ -54,7 +54,7 @@ class EFMcollocation(BaseCollocation):
 
         self.boundary_rxns = []
         for bs in boundary_species:
-            rxns = all_boundary_rxns.query(lambda r: r.reactants[0].id in bs)
+            rxns = all_boundary_rxns.query(lambda r: r.reactants[0].id == bs)
 
             assert len(rxns) == 1, (
                 "Error finding boundary reactions for {}: ".format(bs) + 

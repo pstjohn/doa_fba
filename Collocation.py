@@ -12,7 +12,8 @@ from warnings import warn
 class Collocation(BaseCollocation):
 
     def __init__(self, model, boundary_species):
-        """ Initialize the collocation object.
+        """ A class to handle the optimization of kinetic uptake parameters to
+        match a dynamic model to a given set of experimental data.
 
         model: a cs.SXFunction object
             a model that describes substrate uptake and biomass formation
@@ -23,7 +24,6 @@ class Collocation(BaseCollocation):
             state should represent the current biomass concentration.
 
         """
-
         # Assign sizing variables
         self.nx = model.getInput(1).shape[0]
         self.np = model.getInput(2).shape[0]
@@ -70,10 +70,19 @@ class Collocation(BaseCollocation):
         # Initialize default variable bounds
         self.var.x_lb[:] = 0.
         self.var.x_ub[:] = 200.
+        self.var.x_in[:] = 1.
 
         self.var.p_lb[:] = 0.
         self.var.p_ub[:] = 100.
-        
+        self.var.p_in[:] = 0.
+
+        # Initialize optimization parameters
+        parameters = {
+            'alpha' : (1,),
+        }
+
+        self.pvar = VariableHandler(parameters)
+        self.pvar.alpha_in[:] = 0.
         
     def _initialize_polynomial_constraints(self):
         """ Add constraints to the model to account for system dynamics and
@@ -86,7 +95,6 @@ class Collocation(BaseCollocation):
         for k in range(self.nk):
             for j in range(self.d+1):
                 T[k,j] = h*(k + self.col_vars['tau_root'][j])
-
 
         # For all finite elements
         for k in range(self.nk):
@@ -101,13 +109,12 @@ class Collocation(BaseCollocation):
                     xp_jk += self.col_vars['C'][r,j]*cs.SX(self.var.x_sx[k,r])
 
                 # Add collocation equations to the NLP.
-                # (Pull boundary fluxes for this FE from the flux DF)
+                # Boundary fluxes are calculated by multiplying the EFM
+                # coefficients in V by the efm matrix
                 [fk] = self.dxdt.call(
                     [T[k,j], cs.SX(self.var.x_sx[k,j]), cs.SX(self.var.p_sx)])
 
-                self.constraints_sx.append(h*fk - xp_jk)
-                self.constraints_lb.append(np.zeros(self.nx))
-                self.constraints_ub.append(np.zeros(self.nx))
+                self.add_constraint(h * fk - xp_jk)
 
             # Add continuity equation to NLP
             if k+1 != self.nk:
@@ -115,20 +122,21 @@ class Collocation(BaseCollocation):
                 # Get an expression for the state at the end of the finite
                 # element
                 xf_k = self.col_vars['D'].dot(cs.SX(self.var.x_sx[k]))
-
-                self.constraints_sx.append(cs.SX(self.var.x_sx[k+1,0]) - xf_k)
-                self.constraints_lb.append(np.zeros(self.nx))
-                self.constraints_ub.append(np.zeros(self.nx))
+                self.add_constraint(cs.SX(self.var.x_sx[k+1,0]) - xf_k)
 
         # Get an expression for the endpoint for objective purposes
         xf = self.col_vars['D'].dot(cs.SX(self.var.x_sx[-1]))
         self.xf = {met : x_sx for met, x_sx in zip(self.boundary_species, xf)}
 
+        # Similarly, get an expression for the beginning point
+        x0 = self.var.x_sx[0,0,:]
+        self.x0 = {met : x_sx for met, x_sx in zip(self.boundary_species, x0)}    
+
     def _initialize_mav_objective(self):
         """ Initialize the objective function to minimize the absolute value of
         the flux vector """
 
-        self.objective_sx += (self.col_vars['alpha'] *
+        self.objective_sx += (self.pvar.alpha_sx *
                               cs.fabs(self.var.p_sx).sum())
 
 

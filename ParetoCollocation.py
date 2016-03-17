@@ -1,6 +1,9 @@
 import numpy as np
 import pandas as pd
 
+from scipy.interpolate import UnivariateSpline
+from scipy.integrate import cumtrapz
+
 try:
     import progressbar
 except ImportError:
@@ -34,7 +37,7 @@ class ParetoCollocation(EFMcollocation):
         self.pvar.alpha_in[:] = alpha
         return super(ParetoCollocation, self).warm_solve()
 
-    def solve_series(self, xs, reduce_function):
+    def solve_series(self, xs, reduce_function, warmsolve=True):
 
         xs = np.asarray(xs)
         xs.sort()
@@ -47,8 +50,12 @@ class ParetoCollocation(EFMcollocation):
 
         for i, x in enumerate(xs):
             try:
-                if i == 0: self.solve(x)
-                else: self.warm_solve(x)
+                if warmsolve:
+                    if i == 0: self.solve(x)
+                    else: self.warm_solve(x)
+                else:
+                    self.solve(x)
+
                 out[x] = reduce_function(self)
             except RuntimeWarning:
                 out[x] = np.nan
@@ -56,3 +63,44 @@ class ParetoCollocation(EFMcollocation):
             if progressbar: bar.update(i)
 
         return pd.DataFrame(out).T
+
+
+class AlphaInterpolator(object):
+
+    def __init__(self, a, x, y):
+        self.a = a
+        self.x = x
+        self.y = y
+
+        self._create_interpolating_polynomials()
+        self._find_path_length()
+
+
+    def _create_interpolating_polynomials(self):
+        self.x_interp = UnivariateSpline(self.a, self.x, s=0)
+        self.y_interp = UnivariateSpline(self.a, self.y, s=0)
+
+
+    def _find_path_length(self):
+        dx_interp = self.x_interp.derivative()
+        dy_interp = self.y_interp.derivative()
+
+        ts = np.linspace(0, 1, 200)
+        line_length = cumtrapz(np.sqrt(dx_interp(ts)**2 + dy_interp(ts)**2),
+                               x=ts, initial=0.) 
+
+        line_length /= line_length.max()
+
+        # Here we invert the line_length (ts) function, in order to evenly
+        # sample the pareto front
+        self.l_interp = UnivariateSpline(line_length, ts, s=0)
+
+    def sample(self, num):
+        """ Return estimates of alpha values that evenly sample the pareto
+        front """
+        
+        out = self.l_interp(np.linspace(0, 1, num))
+        out[0] = 0.
+        out[-1] = 1.
+        return out
+

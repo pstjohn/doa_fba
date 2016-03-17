@@ -1,5 +1,5 @@
 import numpy as np
-
+import pandas as pd
 import casadi as cs
 
 
@@ -84,7 +84,8 @@ class BaseCollocation(object):
         # Call the solver
         self._result = self._solver(arg)
 
-        if self._solver.getStat('return_status') != 'Solve_Succeeded':
+        if self._solver.getStat('return_status') not in [
+                'Solve_Succeeded', 'Solved_To_Acceptable_Level']:
             raise RuntimeWarning('Solve status: {}'.format(
                 self._solver.getStat('return_status')))
 
@@ -234,3 +235,33 @@ class BaseCollocation(object):
         except AttributeError: pass
 
         return float(self._result['f'])
+
+
+
+@cs.pycallback
+class IterationCallback(object):
+    def __init__(self):
+        """ A class to store intermediate optimization results. Should be
+        passed as an initialized object to ```initialize_solver``` under the
+        keyword "iteration_callback". """
+
+        self.iteration = 0
+        self._x_data = {}
+        self._f_data = {}
+
+    def __call__(self, f, *args):
+        self.iteration += 1
+
+        self._x_data[self.iteration] = f.getOutput('x').toArray().flatten()
+        self._f_data[self.iteration] = float(f.getOutput('f'))
+
+    @property
+    def x_data(self):
+        return pd.DataFrame(self._x_data)
+
+    @property
+    def f_data(self):
+        return pd.Series(self._f_data)
+
+
+
