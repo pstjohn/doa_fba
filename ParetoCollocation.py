@@ -68,17 +68,19 @@ class ParetoCollocation(EFMcollocation):
 class AlphaInterpolator(object):
 
     def __init__(self, a, x, y):
-        self.a = a
-        self.x = x
-        self.y = y
+
+        # Drop NaN values to avoid fitpack errors
+        self._data = pd.DataFrame(np.array([a, x, y]).T, 
+                                  columns=['a', 'x', 'y'])
+        self._data.dropna(inplace=True)
 
         self._create_interpolating_polynomials()
         self._find_path_length()
 
 
     def _create_interpolating_polynomials(self):
-        self.x_interp = UnivariateSpline(self.a, self.x, s=0)
-        self.y_interp = UnivariateSpline(self.a, self.y, s=0)
+        self.x_interp = UnivariateSpline(self._data.a, self._data.x, s=0)
+        self.y_interp = UnivariateSpline(self._data.a, self._data.y, s=0)
 
 
     def _find_path_length(self):

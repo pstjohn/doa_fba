@@ -40,11 +40,9 @@ class EFMcollocation(BaseCollocation):
 
         self.nx = len(boundary_species)
         self.nv = efms.shape[0]
-        self.nm = len(self.model.metabolites)
+        # self.nm = len(self.model.metabolites)
         self.nf = len(stage_breakdown)
 
-        # assert self.nx == efms.shape[1], "EFMs are the wrong shape"
-        
         # store stage breakdowns
         self.stage_breakdown = stage_breakdown
 
@@ -62,6 +60,11 @@ class EFMcollocation(BaseCollocation):
 
             self.boundary_rxns += [rxns[0].id]
 
+        # Ensure all of the boundary species are accounted for
+        present = pd.Series(self.boundary_rxns).isin(efms.columns)
+        assert present.all(), ('EFMS not found for {}'.format(
+            pd.Series(self.boundary_species)[~present].values))
+
         # Assure that efms are in the correct order
         self.efms_float = efms.loc[:, self.boundary_rxns]
         self.efms_object = pd.DataFrame(self.efms_float, dtype=object)
@@ -73,12 +76,12 @@ class EFMcollocation(BaseCollocation):
         self.nk = sum(stage_breakdown)
 
 
-    def setup(self):
+    def setup(self, **variable_args):
         """ Set up the collocation framework """
 
         self._initialize_dynamic_model()
         self._initialize_polynomial_coefs()
-        self._initialize_variables()
+        self._initialize_variables(**variable_args)
         self._initialize_polynomial_constraints()
 
     def initialize(self, **kwargs):
@@ -149,11 +152,15 @@ class EFMcollocation(BaseCollocation):
                     lb, ub = boundary_func(x)
 
                     if lb is not None:
-                        self.add_constraint(rxn_sx - lb, 0, cs.inf)
+                        self.add_constraint(
+                            rxn_sx - lb, 0, cs.inf, 'Boundary constraint lower'
+                            'bound - FE {0}, degree {1}'.format(k, j))
 
 
                     if ub is not None:
-                        self.add_constraint(ub - rxn_sx, 0, cs.inf)
+                        self.add_constraint(
+                            ub - rxn_sx, 0, cs.inf, 'Boundary constraint upper'
+                            'bound - FE {0}, degree {1}'.format(k, j))
 
     def _initialize_dynamic_model(self):
         """ Initialize the model of biomass growth and substrate accumulation
@@ -167,7 +174,7 @@ class EFMcollocation(BaseCollocation):
 
         self.dxdt = cs.SXFunction('dxdt', [t,x,vb], [xdot])
 
-    def _initialize_variables(self):
+    def _initialize_variables(self, pvars=None):
 
         core_variables = {
             'x'  : (self.nk, self.d+1, self.nx),
@@ -181,6 +188,7 @@ class EFMcollocation(BaseCollocation):
         # Initialize default variable bounds
         self.var.x_lb[:] = 0.
         self.var.x_ub[:] = 100.
+        self.var.x_in[:] = 1.
 
         # Initialize EFM bounds. EFMs are nonnegative.
         self.var.v_lb[:] = 0.
@@ -197,20 +205,18 @@ class EFMcollocation(BaseCollocation):
         self.var.h_ub[:] = 10.
         self.var.h_in[:] = 1.
 
-
         # Maintain compatibility with codes using a symbolic final time
         self.var.tf_sx = sum([self.var.h_sx[i] * self.stage_breakdown[i]
                               for i in xrange(self.nf)])
-
 
         # We also want the v_sx variable to represent a fraction of the overall
         # efm, so we'll add a constraint saying the sum of the variable must
         # equal 1.
         self.add_constraint(cs.SX(self.var.v_sx.sum(1)), np.ones(self.nf),
-                            np.ones(self.nf))
+                            np.ones(self.nf), 'Sum(v_sx) == 1')
 
-
-        self.pvar = VariableHandler({})
+        if pvars is None: pvars = {}
+        self.pvar = VariableHandler(pvars)
 
     def _get_stage_index(self, finite_element):
         """ Find the current stage based on the indexed finite_element """
@@ -257,7 +263,8 @@ class EFMcollocation(BaseCollocation):
                      self._get_symbolic_flux(k, j)])
 
                 self.add_constraint(
-                    self.var.h_sx[self._get_stage_index(k)] * fk - xp_jk)
+                    self.var.h_sx[self._get_stage_index(k)] * fk - xp_jk,
+                    msg='DXDT collocation - FE {0}, degree {1}'.format(k,j))
 
             # Add continuity equation to NLP
             if k+1 != self.nk:
@@ -265,7 +272,8 @@ class EFMcollocation(BaseCollocation):
                 # Get an expression for the state at the end of the finite
                 # element
                 xf_k = self.col_vars['D'].dot(cs.SX(self.var.x_sx[k]))
-                self.add_constraint(cs.SX(self.var.x_sx[k+1,0]) - xf_k)
+                self.add_constraint(cs.SX(self.var.x_sx[k+1,0]) - xf_k,
+                                    msg='Continuity - FE {0}'.format(k))
 
         # Get an expression for the endpoint for objective purposes
         xf = self.col_vars['D'].dot(cs.SX(self.var.x_sx[-1]))
@@ -324,16 +332,3 @@ class EFMcollocation(BaseCollocation):
 
         self.ts = self.col_vars['tgrid'].flatten()
         self.sol = self.var.x_op.reshape((self.nk*(self.d+1)), self.nx)
-        
-        
-        
-        
-
-
-
-
-
-        
-
-    
-    

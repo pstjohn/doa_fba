@@ -19,10 +19,14 @@ class BaseCollocation(object):
         self._constraints_ub = []
         self.objective_sx = 0.
 
-    def add_constraint(self, sx, lb=None, ub=None):
+    def add_constraint(self, sx, lb=None, ub=None, msg=None):
         """ Add a constraint to the problem. sx should be a casadi symbolic
         variable, lb and ub should be the same length. If not given, upper and
         lower bounds default to 0. 
+
+        msg (str):
+            A description of the constraint, to be raised if it throws an nan
+            error
 
         Replaces manual addition of constraint variables to allow for warnings
         to be issues when a constraint that returns 'nan' with the current
@@ -48,10 +52,14 @@ class BaseCollocation(object):
             gfcn = cs.SXFunction('g test',
                                  [self.var.vars_sx, self.pvar.vars_sx],
                                  [sx])
-            out = np.asarray(gfcn([self.var.vars_in, 1.])[0])
+            out = np.asarray(gfcn([self.var.vars_in, self.pvar.vars_in])[0])
             if np.any(np.isnan(out)):
-                raise RuntimeWarning('Constraint gives NAN with default input '
-                                     'arguments')
+                error_states = np.array(self.boundary_species)[
+                    np.where(np.isnan(out))[0]]
+                raise RuntimeWarning('Constraint yields NAN with given input '
+                                     'arguments: \nConstraint:\n\t{0}\n'
+                                     'Offending states: {1}'.format(
+                                         msg, error_states))
         
         except (AttributeError, KeyError):
             pass

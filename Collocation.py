@@ -1,13 +1,13 @@
-import pandas as pd
+from warnings import warn
+
 import numpy as np
+from scipy.interpolate import lagrange
+import pandas as pd
 
 import casadi as cs
 
 from .VariableHandler import VariableHandler
 from .BaseCollocation import BaseCollocation
-
-from warnings import warn
-
 
 class Collocation(BaseCollocation):
 
@@ -203,8 +203,15 @@ class Collocation(BaseCollocation):
         if weights is None:
             weights = self.data.max()
 
+        self.weights = weights
+
+        self._set_objective_from_data(self.data, self.weights)
+
+
+    def _set_objective_from_data(self, data, weights):
+
         obj_list = []
-        for ((ti, state), xi) in self.data.stack().iteritems():
+        for ((ti, state), xi) in data.stack().iteritems():
             obj_list += [(self._get_interp(ti, [state]) - xi) / weights[state]]
 
         obj_resid = cs.sum_square(cs.vertcat(obj_list))
@@ -218,6 +225,12 @@ class Collocation(BaseCollocation):
 
         return out
 
+    def warm_solve(self, ode=True, **kwargs):
+
+        out = super(Collocation, self).warm_solve(**kwargs)
+        if ode: self.solve_ode()
+
+        return out
 
     def solve_ode(self):
         """ Solve the ODE using casadi's CVODES wrapper to ensure that the
@@ -259,29 +272,81 @@ class Collocation(BaseCollocation):
 
         fig, ax = plt.subplots(sharex=True, nrows=2, ncols=1,
                                figsize=(8,5))
+
+        colors = sns.color_palette()
         
-        lines = ax[0].plot(self.ts, self.sol[:,1:], '.--')
+        ts = np.linspace(0, self.tf, 100)
+        sol = self._interpolate_solution(ts)
+
+        lines = ax[0].plot(ts, sol[:,1:], '-')
         ax[0].legend(lines, self.boundary_species[1:],
                      loc='upper center', ncol=2)
 
-        lines = ax[1].plot(self.ts, self.sol[:,0], '.--')
-        ax[1].legend(['Biomass'])
+        lines = ax[1].plot(ts, sol[:,0], '-', color=colors[0])
+        ax[1].legend(['Biomass'], loc='upper center')
 
 
         state_data = self.data.loc[:, self.data.columns > 0]
         bio_data = self.data.loc[:, self.data.columns == 0]
 
-        for (name, col), color in zip(state_data.iteritems(),
-                                      sns.color_palette()):
+        for (name, col), color in zip(state_data.iteritems(), colors):
             ax[0].plot(col.index, col, 'o', color=color)
 
         if not bio_data.empty:
-            ax[1].plot(bio_data.index, bio_data, 'o')
+            ax[1].plot(bio_data.index, bio_data, 'o', color=colors[0])
         
         plt.show()
         
         return fig
 
+    def reset_objective(self):
+        self.objective_sx = 0
+
+
+    def bootstrap(self, n, sample_size=None, map_fn=None, solve_method='warm',
+                  progress=True, **solve_opts):
+        """Perform a bootstrap analysis given the current data. Resamples (with
+        replacement) `n` number of times and re-estimates parameters.
+
+        n (int): number of bootstrap samples
+        sample_size (int): size of each bootstrap sample.
+            Defaults to current data size
+        map_fn (function): A function to apply to the each bootstrap sample.
+            should accept a collocation class as input. Defaults to simply
+            returning self.var.vars_op
+        solve_method ('warm' or None): whether or not to use warm solves
+        progess (bool): whether or not to show a progress bar
+        
+        """
+        if sample_size == None: sample_size = self.data.shape[0] 
+        if map_fn == None: map_fn = lambda coll: coll.var.vars_op
+
+        results = []
+
+        if progress:
+            import progressbar
+            pbar = progressbar.ProgressBar(max_value=n)
+
+        for i in xrange(n):
+            self.reset_objective()
+            self._set_objective_from_data(
+                self.data.sample(self.data.shape[0], replace=True),
+                self.weights)
+            self.initialize(print_level=0, print_time=0, **solve_opts)
+            try:
+                if solve_method is 'warm':
+                    self.warm_solve()
+                else:
+                    self.solve()
+
+                results += [map_fn(self)]
+
+            except Exception:
+                pass
+
+            if progress: pbar.update(i)
+
+        return results
 
     @property
     def rss(self):
@@ -303,4 +368,20 @@ class Collocation(BaseCollocation):
 
         return 2*k + n*np.log(self.rss)
 
+    def _interpolate_solution(self, ts):
 
+        h = self.tf / self.nk
+        stage_starts = pd.Series(h * np.arange(self.nk))
+        stages = stage_starts.searchsorted(ts, side='right') - 1
+
+        out = np.empty((len(ts), self.nx))
+    
+        for ki in range(self.nk):
+            for ni in range(self.nx):
+                interp = lagrange(self.col_vars['tau_root'], 
+                                  self.var.x_op[ki, :, ni])
+
+                out[stages == ki, ni] = interp(
+                    (ts[stages == ki] - stage_starts[ki])/h)
+
+        return out
