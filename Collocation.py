@@ -238,7 +238,7 @@ class Collocation(BaseCollocation):
 
         if err > 1E-3: warn(
                 'Collocation does not match ODE Solution: \
-                {:.2f}% Error'.format(100*err))
+                {:.2%} Error'.format(err))
 
 
     def plot_optimal(self):
