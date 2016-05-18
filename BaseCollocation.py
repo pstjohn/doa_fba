@@ -244,6 +244,30 @@ class BaseCollocation(object):
 
         return float(self._result['f'])
 
+    def __getstate__(self):
+        result = self.__dict__.copy()
+        result['col_vars'] = self.__dict__['col_vars'].copy()
+
+        del result['_constraints_sx']
+        del result['_constraints_lb']
+        del result['_constraints_ub']
+        del result['objective_sx']
+        del result['col_vars']['lfcn']
+        del result['col_vars']['lbg']
+        del result['col_vars']['ubg']
+        del result['dxdt']
+        del result['_solver']
+        del result['_nlp']
+
+        del result['x0']
+        del result['xf']
+
+        return result
+
+    def __setstate__(self, result):
+        self.__dict__ = result
+        self._initialize_polynomial_coefs()
+
 
 
 @cs.pycallback

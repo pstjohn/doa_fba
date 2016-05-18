@@ -111,3 +111,18 @@ class VariableHandler(object):
         return pd.Series([reshape_slice(row, key) for key, row in
                           self._data.iterrows()], index = self._data.index)
 
+    def __getstate__(self):
+        result = self.__dict__.copy()
+        to_delete = [key for key in result.iterkeys() if key.endswith('_sx')]
+        for key in to_delete:
+            del result[key]
+        return result
+    
+    def __setstate__(self, result):
+        self.__dict__ = result
+        self.vars_sx = cs.SX.sym('vars', self._total_length)
+        symbolic_dict = self._expand(self.vars_sx)
+        for key, row in self._data.iterrows():
+            self.__dict__.update({
+                key + '_sx' : symbolic_dict[key],
+            }) 

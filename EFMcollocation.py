@@ -1,10 +1,10 @@
 import bisect
 
-import pandas as pd
 import numpy as np
+from scipy.interpolate import lagrange
+import pandas as pd
 
 import casadi as cs
-import cobra
 
 from .VariableHandler import VariableHandler
 from .BaseCollocation import BaseCollocation
@@ -36,11 +36,8 @@ class EFMcollocation(BaseCollocation):
 
         """
 
-        self.model = cobra.core.DataframeBasedModel(model)
-
         self.nx = len(boundary_species)
         self.nv = efms.shape[0]
-        # self.nm = len(self.model.metabolites)
         self.nf = len(stage_breakdown)
 
         # store stage breakdowns
@@ -137,6 +134,8 @@ class EFMcollocation(BaseCollocation):
 
         for key in constraint_dictionary.iterkeys():
             assert key in self.boundary_species, "{} not found".format(key)
+    
+        self._constraint_fns = constraint_dictionary
 
         # Iterate over each point
         for k in xrange(self.nk):
@@ -332,3 +331,83 @@ class EFMcollocation(BaseCollocation):
 
         self.ts = self.col_vars['tgrid'].flatten()
         self.sol = self.var.x_op.reshape((self.nk*(self.d+1)), self.nx)
+
+
+    def _add_relative_stepsize_constraint(self, relative_size=10.):
+
+        for ii in range(self.nf):
+            for jj in range(ii+1, self.nf):
+                self.add_constraint(self.var.h_sx[ii]/self.var.h_sx[jj],
+                                    1./relative_size, relative_size,
+                                    msg='relative stepsize constraint')
+
+
+    def _interpolate_solution(self, ts):
+
+        out = np.empty((len(ts), self.nx))
+        stage_starts = [0.]
+        for i in xrange(self.nk-1):
+            stage_starts += [self.var.h_op[self._get_stage_index(i)] +
+                             stage_starts[-1]]
+        stage_starts = pd.Series(stage_starts)
+        stages = stage_starts.searchsorted(ts, side='right') - 1
+
+        for ki in range(self.nk):
+            for ni in range(self.nx):
+                interp = lagrange(self.col_vars['tau_root'], 
+                                  self.var.x_op[ki, :, ni])
+
+                out[stages == ki, ni] = interp(
+                    (ts[stages == ki] - stage_starts[ki]) /
+                    self.var.h_op[self._get_stage_index(ki)])
+
+        return out
+
+    def _interpolate_derivative(self, ts):
+
+        out = np.empty((len(ts), self.nx))
+        stage_starts = [0.]
+        for i in xrange(self.nk-1):
+            stage_starts += [self.var.h_op[self._get_stage_index(i)] +
+                             stage_starts[-1]]
+        stage_starts = pd.Series(stage_starts)
+        stages = stage_starts.searchsorted(ts, side='right') - 1
+
+        for ki in range(self.nk):
+            for ni in range(self.nx):
+                interp = lagrange(self.col_vars['tau_root'], 
+                                  (self.col_vars['C'].T.dot(
+                                      self.var.x_op[ki, :, ni]) /
+                                   self.var.h_op[self._get_stage_index(ki)]))
+
+                out[stages == ki, ni] = interp(
+                    (ts[stages == ki] - stage_starts[ki]) /
+                    self.var.h_op[self._get_stage_index(ki)])
+
+        return out
+
+    def _interpolate_boundary_constraints(self, ts):
+
+        stage_starts = [0.]
+        for i in xrange(self.nk-1):
+            stage_starts += [self.var.h_op[self._get_stage_index(i)] +
+                             stage_starts[-1]]
+        stage_starts = pd.Series(stage_starts)
+        stages = stage_starts.searchsorted(ts, side='right') - 1
+
+        for ki in range(self.nk):
+            for ji in xrange(1, self.d+1):
+
+                x = {met : var_op for met, var_op in 
+                     zip(self.boundary_species, self.var.x_op[k,j])}
+
+                interp = lagrange(self.col_vars['tau_root'], 
+                                  (self.col_vars['C'].T.dot(
+                                      self.var.x_op[ki, :, ni]) /
+                                   self.var.h_op[self._get_stage_index(ki)]))
+
+                out[stages == ki, ni] = interp(
+                    (ts[stages == ki] - stage_starts[ki]) /
+                    self.var.h_op[self._get_stage_index(ki)])
+
+        return out
