@@ -90,7 +90,7 @@ class Collocation(object):
         # namespace.
         
         if opts:
-            for key, val in opts.iteritems(): self.opts[key] = val
+            for key, val in opts.items(): self.opts[key] = val
 
         self._initialize_tgrid()
         self._initialize_variables()
@@ -249,7 +249,7 @@ class Collocation(object):
 
         """
 
-        if not states: states = xrange(1, self.NEQ)
+        if not states: states = range(1, self.NEQ)
 
         finite_element = int(t / self.opts['h'])
         tau = (t % self.opts['h']) / self.opts['h']
@@ -279,7 +279,7 @@ class Collocation(object):
         self.data = df.loc[:, ~pd.isnull(df).all(0)]
 
         obj_list = []
-        for ((ti, state), xi) in self.data.stack().iteritems():
+        for ((ti, state), xi) in self.data.stack().items():
             obj_list += [(self._get_interp(ti, [state]) - xi) /
                          self.data[state].max()]
 
@@ -343,7 +343,7 @@ class Collocation(object):
         self._solve_opts = {}
         self._solve_opts.update(default_solve_opts)
         if solve_opts:
-            for key, val in solve_opts.iteritems(): self._solve_opts[key] = val
+            for key, val in solve_opts.items(): self._solve_opts[key] = val
 
         # Initialize arguments for solve method
 
@@ -374,7 +374,7 @@ class Collocation(object):
         }
 
         if args: 
-            for key, val in args.iteritems(): self._args[key] = val
+            for key, val in args.items(): self._args[key] = val
 
         res = self._nlp_solver(self._args)
         self._output = self._parse_solver_output(res)

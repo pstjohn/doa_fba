@@ -39,7 +39,7 @@ model = cs.SXFunction('f', [t,x,p], [rhs])
 
 
 
-from Collocation import Collocation
+from .Collocation import Collocation
 
 new = Collocation(model, ['biomass', 'glucose', 'xylose'])
 

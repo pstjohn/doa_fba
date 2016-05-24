@@ -37,7 +37,7 @@ class DOAcollocation(BaseCollocation):
         if add_biomass:
 
             biomass = cobra.Metabolite('biomass', compartment='e')
-            biomass_rxn = model.objective.keys()[0]
+            biomass_rxn = list(model.objective.keys())[0]
             biomass_rxn.add_metabolites({biomass : 1})
             EX_biomass = cobra.Reaction('EX_biomass')
             EX_biomass.add_metabolites({biomass : -1})
@@ -106,17 +106,17 @@ class DOAcollocation(BaseCollocation):
 
         """
 
-        for key in constraint_dictionary.iterkeys():
+        for key in constraint_dictionary.keys():
             assert key in self.boundary_species, "{} not found".format(key)
 
         # Iterate over each finite element
-        for k in xrange(self.nk):
+        for k in range(self.nk):
             
             # Create a dictionary to pass to the bounds functions
             x = {met : var_sx for met, var_sx in 
                  zip(self.boundary_species, self.var.x_sx[k,0])}
 
-            for met, boundary_func in constraint_dictionary.iteritems():
+            for met, boundary_func in constraint_dictionary.items():
                 rxn = self.boundary_rxns[self.boundary_species.index(met)]
                 rxn_sx = self.var.v_sx.loc[k, rxn]
                 lb, ub = boundary_func(x)

@@ -171,7 +171,7 @@ class Collocation(BaseCollocation):
 
         h = self.tf / self.nk
 
-        if states is None: states = xrange(1, self.nx)
+        if states is None: states = range(1, self.nx)
 
         finite_element = int(t / h)
         tau = (t % h) / h
@@ -211,7 +211,7 @@ class Collocation(BaseCollocation):
     def _set_objective_from_data(self, data, weights):
 
         obj_list = []
-        for ((ti, state), xi) in data.stack().iteritems():
+        for ((ti, state), xi) in data.stack().items():
             obj_list += [(self._get_interp(ti, [state]) - xi) / weights[state]]
 
         obj_resid = cs.sum_square(cs.vertcat(obj_list))
@@ -289,7 +289,7 @@ class Collocation(BaseCollocation):
         state_data = self.data.loc[:, self.data.columns > 0]
         bio_data = self.data.loc[:, self.data.columns == 0]
 
-        for (name, col), color in zip(state_data.iteritems(), colors):
+        for (name, col), color in zip(iter(state_data.items()), colors):
             ax[0].plot(col.index, col, 'o', color=color)
 
         if not bio_data.empty:
@@ -327,7 +327,7 @@ class Collocation(BaseCollocation):
             import progressbar
             pbar = progressbar.ProgressBar(max_value=n)
 
-        for i in xrange(n):
+        for i in range(n):
             self.reset_objective()
             self._set_objective_from_data(
                 self.data.sample(self.data.shape[0], replace=True),

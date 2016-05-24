@@ -132,20 +132,20 @@ class EFMcollocation(BaseCollocation):
 
         """
 
-        for key in constraint_dictionary.iterkeys():
+        for key in constraint_dictionary.keys():
             assert key in self.boundary_species, "{} not found".format(key)
     
         self._constraint_fns = constraint_dictionary
 
         # Iterate over each point
-        for k in xrange(self.nk):
-            for j in xrange(1, self.d+1):
+        for k in range(self.nk):
+            for j in range(1, self.d+1):
             
                 # Create a dictionary to pass to the bounds functions
                 x = {met : var_sx for met, var_sx in 
                      zip(self.boundary_species, self.var.x_sx[k,j])}
 
-                for met, boundary_func in constraint_dictionary.iteritems():
+                for met, boundary_func in constraint_dictionary.items():
                     rxn_sx = self._get_symbolic_flux(k, j)[
                         self.boundary_species.index(met)]
                     lb, ub = boundary_func(x)
@@ -206,7 +206,7 @@ class EFMcollocation(BaseCollocation):
 
         # Maintain compatibility with codes using a symbolic final time
         self.var.tf_sx = sum([self.var.h_sx[i] * self.stage_breakdown[i]
-                              for i in xrange(self.nf)])
+                              for i in range(self.nf)])
 
         # We also want the v_sx variable to represent a fraction of the overall
         # efm, so we'll add a constraint saying the sum of the variable must
@@ -286,8 +286,8 @@ class EFMcollocation(BaseCollocation):
     def _plot_optimal_rates(self, ax):
 
         vs = np.zeros((self.nk, self.d, self.nv))
-        for k in xrange(self.nk):
-            for j in xrange(1, self.d+1):
+        for k in range(self.nk):
+            for j in range(1, self.d+1):
                 vs[k,j-1,:] = (self.var.a_op[k, j-1] *
                                self.var.v_op[self._get_stage_index(k)])
 
@@ -302,13 +302,13 @@ class EFMcollocation(BaseCollocation):
             reactants = efm[efm < -1E-2]
             products = efm[efm > 1E-2]
             reactant_bits = ' + '.join(['{:0.2f} {}'.format(-stoich, name) for
-                                        name, stoich in reactants.iteritems()])
+                                        name, stoich in reactants.items()])
             product_bits = ' + '.join(['{:0.2f} {}'.format(stoich, name) for
-                                       name, stoich in products.iteritems()])
+                                       name, stoich in products.items()])
             return reactant_bits + ' --> ' + product_bits
     
         rxn_strings = [build_rxn_string(efm) for name, efm in
-                       self.efms_float[active_fluxes].T.iteritems()]
+                       self.efms_float[active_fluxes].T.items()]
 
         lines = ax.plot(self.col_vars['tgrid'][:,1:].flatten(), 
                         vs_flat[:, active_fluxes], '.--')
@@ -318,11 +318,11 @@ class EFMcollocation(BaseCollocation):
     def _plot_setup(self):
 
         self.var.tf_op = sum([self.var.h_op[i] * self.stage_breakdown[i]
-                              for i in xrange(self.nf)])
+                              for i in range(self.nf)])
 
         stage_starts = np.hstack(
             [np.array(0.), np.cumsum([self.var.h_op[self._get_stage_index(k)]
-                                      for k in xrange(self.nk - 1)])])
+                                      for k in range(self.nk - 1)])])
 
         self.col_vars['tgrid'] = np.array(
             [start + self.var.h_op[self._get_stage_index(k)] *
@@ -346,7 +346,7 @@ class EFMcollocation(BaseCollocation):
 
         out = np.empty((len(ts), self.nx))
         stage_starts = [0.]
-        for i in xrange(self.nk-1):
+        for i in range(self.nk-1):
             stage_starts += [self.var.h_op[self._get_stage_index(i)] +
                              stage_starts[-1]]
         stage_starts = pd.Series(stage_starts)
@@ -367,7 +367,7 @@ class EFMcollocation(BaseCollocation):
 
         out = np.empty((len(ts), self.nx))
         stage_starts = [0.]
-        for i in xrange(self.nk-1):
+        for i in range(self.nk-1):
             stage_starts += [self.var.h_op[self._get_stage_index(i)] +
                              stage_starts[-1]]
         stage_starts = pd.Series(stage_starts)
@@ -389,14 +389,14 @@ class EFMcollocation(BaseCollocation):
     def _interpolate_boundary_constraints(self, ts):
 
         stage_starts = [0.]
-        for i in xrange(self.nk-1):
+        for i in range(self.nk-1):
             stage_starts += [self.var.h_op[self._get_stage_index(i)] +
                              stage_starts[-1]]
         stage_starts = pd.Series(stage_starts)
         stages = stage_starts.searchsorted(ts, side='right') - 1
 
         for ki in range(self.nk):
-            for ji in xrange(1, self.d+1):
+            for ji in range(1, self.d+1):
 
                 x = {met : var_op for met, var_op in 
                      zip(self.boundary_species, self.var.x_op[k,j])}

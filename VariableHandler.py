@@ -2,6 +2,7 @@ import pandas as pd
 import numpy as np
 
 import casadi as cs
+from functools import reduce
 
 
 class VariableHandler(object):
@@ -49,7 +50,7 @@ class VariableHandler(object):
     @vars_lb.setter
     def vars_lb(self, vars_lb):
         expanded = self._expand(vars_lb)
-        for key, val in expanded.iteritems():
+        for key, val in expanded.items():
             self.__dict__.update({key + '_lb' : val})
 
 
@@ -59,7 +60,7 @@ class VariableHandler(object):
     @vars_ub.setter
     def vars_ub(self, vars_ub):
         expanded = self._expand(vars_ub)
-        for key, val in expanded.iteritems():
+        for key, val in expanded.items():
             self.__dict__.update({key + '_ub' : val})
 
 
@@ -69,7 +70,7 @@ class VariableHandler(object):
     @vars_in.setter
     def vars_in(self, vars_in):
         expanded = self._expand(vars_in)
-        for key, val in expanded.iteritems():
+        for key, val in expanded.items():
             self.__dict__.update({key + '_in' : val})
 
 
@@ -79,7 +80,7 @@ class VariableHandler(object):
     @vars_op.setter
     def vars_op(self, vars_op):
         expanded = self._expand(vars_op)
-        for key, val in expanded.iteritems():
+        for key, val in expanded.items():
             self.__dict__.update({key + '_op' : val})
 
 
@@ -113,7 +114,7 @@ class VariableHandler(object):
 
     def __getstate__(self):
         result = self.__dict__.copy()
-        to_delete = [key for key in result.iterkeys() if key.endswith('_sx')]
+        to_delete = [key for key in result.keys() if key.endswith('_sx')]
         for key in to_delete:
             del result[key]
         return result

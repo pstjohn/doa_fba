@@ -39,7 +39,7 @@ model = cs.SXFunction('f', [t,x,p], [rhs])
 
 
 
-from Collocation import Collocation
+from .Collocation import Collocation
 
 new = Collocation(model, ['biomass', 'glucose', 'xylose'])
 
@@ -71,8 +71,8 @@ out = new.solve(alpha=1E-3)
 
 
 
-print out['f']
-print out['p_opt']
+print(out['f'])
+print(out['p_opt'])
 
 import matplotlib.pylab as plt
 fig, ax = plt.subplots(nrows=2, ncols=1, sharex=True)
@@ -86,4 +86,4 @@ ax[1].plot(out['ts'], out['x_sim'][:,0], '-')
 
 plt.show()
 
-print out['x_opt'][0]
+print(out['x_opt'][0])
