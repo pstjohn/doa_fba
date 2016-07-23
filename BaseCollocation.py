@@ -49,10 +49,10 @@ class BaseCollocation(object):
         assert np.all(lb <= ub), "LB ! <= UB"
 
         try:
-            gfcn = cs.SXFunction('g test',
+            gfcn = cs.Function('g_test',
                                  [self.var.vars_sx, self.pvar.vars_sx],
                                  [sx])
-            out = np.asarray(gfcn([self.var.vars_in, self.pvar.vars_in])[0])
+            out = np.asarray(gfcn(self.var.vars_in, self.pvar.vars_in))
             if np.any(np.isnan(out)):
                 error_states = np.array(self.boundary_species)[
                     np.where(np.isnan(out))[0]]
@@ -113,7 +113,7 @@ class BaseCollocation(object):
     def _initialize_polynomial_coefs(self):
         """ Setup radau polynomials and initialize the weight factor matricies
         """
-        self.col_vars['tau_root'] = cs.collocationPoints(self.d, "radau")
+        self.col_vars['tau_root'] = [0] + cs.collocation_points(self.d, "radau")
 
         # Dimensionless time inside one control interval
         tau = cs.SX.sym("tau")
@@ -131,13 +131,13 @@ class BaseCollocation(object):
                         (self.col_vars['tau_root'][j] -
                          self.col_vars['tau_root'][r]))
 
-        self.col_vars['lfcn'] = lfcn = cs.SXFunction(
-            'lfcn', [tau], [cs.vertcat(L)])
+        self.col_vars['lfcn'] = lfcn = cs.Function(
+            'lfcn', [tau], [cs.vertcat(*L)])
 
         # Evaluate the polynomial at the final time to get the coefficients of
         # the continuity equation
         # Coefficients of the continuity equation
-        self.col_vars['D'] = lfcn([1.0])[0].toArray().squeeze()
+        self.col_vars['D'] = np.asarray(lfcn(1.0)).squeeze()
 
         # Evaluate the time derivative of the polynomial at all collocation
         # points to get the coefficients of the continuity equation
@@ -146,8 +146,7 @@ class BaseCollocation(object):
         # Coefficients of the collocation equation
         self.col_vars['C'] = np.zeros((self.d+1, self.d+1))
         for r in range(self.d+1):
-            self.col_vars['C'][:,r] = tfcn([self.col_vars['tau_root'][r]]
-                                           )[0].toArray().squeeze()
+            self.col_vars['C'][:,r] = np.asarray(tfcn(self.col_vars['tau_root'][r])[0]).squeeze()
 
         # Find weights for gaussian quadrature: approximate int_0^1 f(x) by
         # Sum(
@@ -156,23 +155,22 @@ class BaseCollocation(object):
         Phi = [[]] * (self.d+1)
 
         for j in range(self.d+1):
-            tau_f_integrator = cs.SXFunction('ode', cs.daeIn(t=tau, x=xtau),
-                                             cs.daeOut(ode=L[j]))
-            tau_integrator = cs.Integrator(
-                "integrator", "cvodes", tau_f_integrator, {'t0':0., 'tf':1})
-            Phi[j] = np.asarray(tau_integrator({'x0' : 0})['xf'])[0][0]
+            dae = dict(t=tau, x=xtau, ode=L[j])
+            tau_integrator = cs.integrator(
+                "integrator", "cvodes", dae, {'t0':0., 'tf':1})
+            Phi[j] = np.asarray(tau_integrator(x0=0)['xf'])
 
         self.col_vars['Phi'] = np.array(Phi)
         
     def _initialize_solver(self, **kwargs):
 
         # Initialize NLP object
-        self._nlp = cs.SXFunction(
+        self._nlp = cs.Function(
             'nlp', 
             cs.nlpIn(x = self.var.vars_sx,
                      p = self.pvar.vars_sx),
             cs.nlpOut(f = self.objective_sx, 
-                      g = cs.vertcat(self._constraints_sx)))
+                      g = cs.vertcat(*self._constraints_sx)))
 
         opts = {
             'max_iter' : 10000,
@@ -284,7 +282,7 @@ class IterationCallback(object):
     def __call__(self, f, *args):
         self.iteration += 1
 
-        self._x_data[self.iteration] = f.getOutput('x').toArray().flatten()
+        self._x_data[self.iteration] = np.asarray(f.getOutput('x')).flatten()
         self._f_data[self.iteration] = float(f.getOutput('f'))
 
     @property

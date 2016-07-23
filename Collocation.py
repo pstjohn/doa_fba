@@ -25,10 +25,10 @@ class Collocation(BaseCollocation):
 
         """
         # Assign sizing variables
-        self.nx = model.getInput(1).shape[0]
-        self.np = model.getInput(2).shape[0]
+        self.nx = model.mx_in(1).shape[0]
+        self.np = model.mx_in(2).shape[0]
 
-        assert model.getOutput(0).shape[0] == self.nx, \
+        assert model.mx_out(0).shape[0] == self.nx, \
             "Output length mismatch"
 
         # Attach model
@@ -175,7 +175,7 @@ class Collocation(BaseCollocation):
 
         finite_element = int(t / h)
         tau = (t % h) / h
-        basis = self.col_vars['lfcn']([tau])[0].toArray().flatten()
+        basis = np.asarray(self.col_vars['lfcn'](tau)).flatten()
         x = getattr(self.var, 'x_' + x_rep)
         x_roots = x[finite_element, :, states]
 

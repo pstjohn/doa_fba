@@ -171,7 +171,7 @@ class EFMcollocation(BaseCollocation):
 
         xdot = vb * x[0]             # Here we assume biomass is in x[0]
 
-        self.dxdt = cs.SXFunction('dxdt', [t,x,vb], [xdot])
+        self.dxdt = cs.Function('dxdt', [t,x,vb], [xdot])
 
     def _initialize_variables(self, pvars=None):
 

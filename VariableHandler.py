@@ -41,7 +41,7 @@ class VariableHandler(object):
                 key + '_in' : np.zeros(row.shapes), # Initial guess
                 key + '_op' : np.zeros(row.shapes), # Optimized Value
                 key + '_sx' : symbolic_dict[key],
-            })
+           })
 
 
     @property
@@ -103,11 +103,15 @@ class VariableHandler(object):
     def _expand(self, vector):
         """ Given a flattened vector, expand into the component matricies """
 
-        vector = np.asarray(vector)
+        # vector = np.asarray(vector)
+        vector = np.array([vector[i] for i in range(vector.shape[0])])
         assert len(vector) == self._total_length, "expand length mismatch"
 
         def reshape_slice(row, key):
             return vector[row.start:row.end].reshape(row.shapes)
+
+        return {key : reshape_slice(row, key) for key, row in
+                self._data.iterrows()}
 
         return pd.Series([reshape_slice(row, key) for key, row in
                           self._data.iterrows()], index = self._data.index)

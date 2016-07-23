@@ -26,20 +26,20 @@ glucose_specific_growth = p[6]
 xylose_consumption = p[2] * x[2] / (p[3] + x[2]) * (1. / (1. + (x[1] * p[4])))
 xylose_specific_growth = p[7]
 
-rhs = cs.vertcat([
+rhs = cs.vertcat(*[
     x_biomass * (glucose_specific_growth * glucose_consumption +
                  xylose_specific_growth * xylose_consumption),
     -x_biomass * glucose_consumption,
     -x_biomass * xylose_consumption,
 ])
 
-f = cs.SXFunction('f', [t,x,p], [rhs])
+f = cs.Function('f', [t,x,p], [rhs])
 
-model = cs.SXFunction('f', [t,x,p], [rhs])
+model = cs.Function('f', [t,x,p], [rhs])
 
 
 
-from .Collocation import Collocation
+from Collocation import Collocation
 
 new = Collocation(model, ['biomass', 'glucose', 'xylose'])
 
