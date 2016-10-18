@@ -211,8 +211,12 @@ class EFMcollocation(BaseCollocation):
         # We also want the v_sx variable to represent a fraction of the overall
         # efm, so we'll add a constraint saying the sum of the variable must
         # equal 1.
-        self.add_constraint(cs.SX(self.var.v_sx.sum(1)), np.ones(self.nf),
-                            np.ones(self.nf), 'Sum(v_sx) == 1')
+        if self.nf > 1:
+            self.add_constraint(cs.sum2(self.var.v_sx[:]), np.ones(self.nf),
+                                np.ones(self.nf), 'Sum(v_sx) == 1')
+        elif self.nf == 1:
+            self.add_constraint(cs.sum1(self.var.v_sx[:]), np.ones(self.nf),
+                                np.ones(self.nf), 'Sum(v_sx) == 1')
 
         if pvars is None: pvars = {}
         self.pvar = VariableHandler(pvars)
@@ -225,10 +229,14 @@ class EFMcollocation(BaseCollocation):
         """ Get a symbolic expression for the boundary fluxes at the given
         finite_element and polynomial degree """
 
-        return cs.SX(self.efms_object.T.dot((
-            np.asarray(self.var.a_sx[finite_element, degree-1], dtype=object) * 
-            np.asarray(self.var.v_sx[self._get_stage_index(finite_element)],
-                       dtype=object)).flatten()).values) 
+        return cs.mtimes(cs.DM(self.efms_object.T.values), 
+                         self.var.a_sx[finite_element, degree-1] * 
+                         self.var.v_sx[self._get_stage_index(finite_element)])
+    
+    # cs.SX(self.efms_object.T.dot((
+    #         np.asarray(self.var.a_sx[finite_element, degree-1], dtype=object) * 
+    #         np.asarray(self.var.v_sx[self._get_stage_index(finite_element)],
+    #                    dtype=object)).flatten()).values) 
 
     def _initialize_polynomial_constraints(self):
         """ Add constraints to the model to account for system dynamics and
@@ -250,9 +258,7 @@ class EFMcollocation(BaseCollocation):
 
                 # Get an expression for the state derivative at the collocation
                 # point
-                xp_jk = 0
-                for r in range(self.d+1):
-                    xp_jk += self.col_vars['C'][r,j]*cs.SX(self.var.x_sx[k,r])
+                xp_jk = cs.mtimes(cs.DM(self.col_vars['C'][:,j]).T, self.var.x_sx[k]).T
 
                 # Add collocation equations to the NLP.
                 # Boundary fluxes are calculated by multiplying the EFM
@@ -270,12 +276,13 @@ class EFMcollocation(BaseCollocation):
                 
                 # Get an expression for the state at the end of the finite
                 # element
-                xf_k = self.col_vars['D'].dot(cs.SX(self.var.x_sx[k]))
-                self.add_constraint(cs.SX(self.var.x_sx[k+1,0]) - xf_k,
+                self.add_constraint(
+                    cs.SX(self.var.x_sx[k+1,0]) -
+                    self._get_endpoint_expr(self.var.x_sx[k]),
                                     msg='Continuity - FE {0}'.format(k))
 
         # Get an expression for the endpoint for objective purposes
-        xf = self.col_vars['D'].dot(cs.SX(self.var.x_sx[-1]))
+        xf = self._get_endpoint_expr(self.var.x_sx[-1])
         self.xf = {met : x_sx for met, x_sx in zip(self.boundary_species, xf)}
 
         # Similarly, get an expression for the beginning point
@@ -386,28 +393,28 @@ class EFMcollocation(BaseCollocation):
 
         return out
 
-    def _interpolate_boundary_constraints(self, ts):
-
-        stage_starts = [0.]
-        for i in range(self.nk-1):
-            stage_starts += [self.var.h_op[self._get_stage_index(i)] +
-                             stage_starts[-1]]
-        stage_starts = pd.Series(stage_starts)
-        stages = stage_starts.searchsorted(ts, side='right') - 1
-
-        for ki in range(self.nk):
-            for ji in range(1, self.d+1):
-
-                x = {met : var_op for met, var_op in 
-                     zip(self.boundary_species, self.var.x_op[k,j])}
-
-                interp = lagrange(self.col_vars['tau_root'], 
-                                  (self.col_vars['C'].T.dot(
-                                      self.var.x_op[ki, :, ni]) /
-                                   self.var.h_op[self._get_stage_index(ki)]))
-
-                out[stages == ki, ni] = interp(
-                    (ts[stages == ki] - stage_starts[ki]) /
-                    self.var.h_op[self._get_stage_index(ki)])
-
-        return out
+    # def _interpolate_boundary_constraints(self, ts):
+    #
+    #     stage_starts = [0.]
+    #     for i in range(self.nk-1):
+    #         stage_starts += [self.var.h_op[self._get_stage_index(i)] +
+    #                          stage_starts[-1]]
+    #     stage_starts = pd.Series(stage_starts)
+    #     stages = stage_starts.searchsorted(ts, side='right') - 1
+    #
+    #     for ki in range(self.nk):
+    #         for ji in range(1, self.d+1):
+    #
+    #             x = {met : var_op for met, var_op in 
+    #                  zip(self.boundary_species, self.var.x_op[k,j])}
+    #
+    #             interp = lagrange(self.col_vars['tau_root'], 
+    #                               (self.col_vars['C'].T.dot(
+    #                                   self.var.x_op[ki, :, ni]) /
+    #                                self.var.h_op[self._get_stage_index(ki)]))
+    #
+    #             out[stages == ki, ni] = interp(
+    #                 (ts[stages == ki] - stage_starts[ki]) /
+    #                 self.var.h_op[self._get_stage_index(ki)])
+    #
+    #     return out

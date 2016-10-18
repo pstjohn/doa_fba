@@ -2,8 +2,11 @@ import pandas as pd
 import numpy as np
 
 import casadi as cs
-from functools import reduce
 
+from functools import reduce
+from operator import mul
+import itertools
+from collections import Iterable
 
 class VariableHandler(object):
 
@@ -18,12 +21,7 @@ class VariableHandler(object):
 
         self._data = pd.DataFrame(pd.Series(shape_dict), columns=['shapes'])
 
-        from operator import mul
-        def elements(shape):
-            try: return reduce(mul, shape)
-            except TypeError: return shape
-
-        self._data['lengths'] = self._data.shapes.apply(elements)
+        self._data['lengths'] = self._data.shapes.apply(product)
         self._data['end'] = self._data.lengths.cumsum()
         self._data['start'] = self._data.end - self._data.lengths
         self._total_length = self._data.lengths.sum()
@@ -103,18 +101,17 @@ class VariableHandler(object):
     def _expand(self, vector):
         """ Given a flattened vector, expand into the component matricies """
 
-        # vector = np.asarray(vector)
-        vector = np.array([vector[i] for i in range(vector.shape[0])])
-        assert len(vector) == self._total_length, "expand length mismatch"
-
         def reshape_slice(row, key):
-            return vector[row.start:row.end].reshape(row.shapes)
+            if isinstance(vector, cs.SX):
+                return LinearSlicer(vector[row.start:row.end], row.shapes)
+            else:
+                return vector[row.start:row.end].reshape(row.shapes)
 
         return {key : reshape_slice(row, key) for key, row in
                 self._data.iterrows()}
 
-        return pd.Series([reshape_slice(row, key) for key, row in
-                          self._data.iterrows()], index = self._data.index)
+        # return pd.Series([reshape_slice(row, key) for key, row in
+        #                   self._data.iterrows()], index = self._data.index)
 
     def __getstate__(self):
         result = self.__dict__.copy()
@@ -131,3 +128,57 @@ class VariableHandler(object):
             self.__dict__.update({
                 key + '_sx' : symbolic_dict[key],
             }) 
+
+
+class LinearSlicer(object):
+    def __init__(self, data, shape):
+        """Class to handle the slicing of an object stored as a C-continuous
+        casadi SX list """
+        
+        if not isinstance(shape, Iterable):
+            shape = [shape,]
+        
+        assert data.size1() == product(shape)
+        
+        self._data = data
+        self._shape = shape
+        self._ndim = len(shape)
+    
+    def __getitem__(self, indices):
+        
+        if not isinstance(indices, Iterable):
+            indices = [indices,]
+        else:
+            indices = list(indices)
+            
+        if len(indices) < self._ndim:
+            indices += [slice(None, None, None)]*(
+                self._ndim - len(indices))
+            
+        for i, index in enumerate(indices):
+            if isinstance(index, slice):
+                indices[i] = list(range(*index.indices(self._shape[i])))
+
+            elif isinstance(index, int):
+                if index < 0 : #Handle negative indices
+                    index += self._shape[i]
+                indices[i] = [index,]
+            
+        desired_shape = [len(i) for i in indices if len(i) is not 1]
+        if len(desired_shape) < 2:
+            desired_shape += [1]*(2 - len(desired_shape))
+        elif len(desired_shape) > 2:
+            raise AssertionError('Casadi matrices can only be 2-D')
+
+        multi_index = np.array(list(itertools.product(*indices)))
+        multi_index_tuples = tuple([elem for elem in multi_index.T])
+        
+        raveled_index = np.ravel_multi_index(multi_index_tuples, self._shape)
+        
+        return self._data[raveled_index].reshape(
+            (desired_shape[1], desired_shape[0])).T
+    
+
+def product(iterable):
+    try: return reduce(mul, iterable)
+    except TypeError: return iterable

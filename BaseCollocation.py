@@ -90,19 +90,18 @@ class BaseCollocation(object):
 
 
         # Call the solver
-        self._result = self._solver(arg)
+        self._result = self._solver.call(arg)
 
-        if self._solver.getStat('return_status') not in [
+        if self._solver.stats()['return_status'] not in [
                 'Solve_Succeeded', 'Solved_To_Acceptable_Level']:
             raise RuntimeWarning('Solve status: {}'.format(
-                self._solver.getStat('return_status')))
+                self._solver._solver.stats()['return_status']))
 
         # Process the optimal vector
-        self.var.vars_op = self._result['x']
-
+        self.var.vars_op = np.asarray(self._result['x'])
 
         # Store the optimal solution as initial vectors for the next go-around
-        self.var.vars_in = self.var.vars_op
+        self.var.vars_in = np.asarray(self.var.vars_op)
 
         try: self._plot_setup()
         except AttributeError: pass
@@ -164,83 +163,102 @@ class BaseCollocation(object):
         
     def _initialize_solver(self, **kwargs):
 
-        # Initialize NLP object
-        self._nlp = cs.Function(
-            'nlp', 
-            cs.nlpIn(x = self.var.vars_sx,
-                     p = self.pvar.vars_sx),
-            cs.nlpOut(f = self.objective_sx, 
-                      g = cs.vertcat(*self._constraints_sx)))
+        nlpsol_args = {"expand", "iteration_callback",
+                       "iteration_callback_step",
+                       "iteration_callback_ignore_errors", "ignore_check_vec",
+                       "warn_initial_bounds", "eval_errors_fatal",
+                       "print_time", "verbose_init"}
 
+        # Initialize NLP object
         opts = {
-            'max_iter' : 10000,
-            'linear_solver' : 'ma27'
+            'ipopt.max_iter' : 10000,
+            # 'linear_solver' : 'ma27'
         }
         
-        if kwargs is not None: opts.update(kwargs)
+        if kwargs is not None: 
+            for key, val in kwargs.items(): 
+                if key in nlpsol_args:
+                    opts.update({key: val })
+                else:
+                    opts.update({'ipopt.' + key: val })
 
         self._solver_opts = opts
+        constraints = cs.vertcat(*self._constraints_sx)
 
-        self._solver = cs.NlpSolver("solver", "ipopt", self._nlp,
-                                    self._solver_opts)
+
+
+
+        self._solver = cs.nlpsol(
+            "solver", "ipopt",
+            {'x': self.var.vars_sx,
+             'p': self.pvar.vars_sx,
+             'f': self.objective_sx,
+             'g': constraints},
+            self._solver_opts)
 
         self.col_vars['lbg'] = np.concatenate(self._constraints_lb)
         self.col_vars['ubg'] = np.concatenate(self._constraints_ub)
 
-    def warm_solve(self, x0=None, lam_x=None, lam_g=None):
-        """Solve the collocation problem using an initial guess and basis from
-        a prior solve. Defaults to using the variables from the solve stored in
-        _results. 
+    # def warm_solve(self, x0=None, lam_x=None, lam_g=None):
+    #     """Solve the collocation problem using an initial guess and basis from
+    #     a prior solve. Defaults to using the variables from the solve stored in
+    #     _results. 
+    #
+    #     """
+    #     warm_solve_opts = dict(self._solver_opts)
+    #
+    #     warm_solve_opts["warm_start_init_point"] = "yes"
+    #     warm_solve_opts["warm_start_bound_push"] = 1e-6
+    #     warm_solve_opts["warm_start_slack_bound_push"] = 1e-6
+    #     warm_solve_opts["warm_start_mult_bound_push"] = 1e-6
+    #
+    #     solver = self._solver = cs.NlpSolver("solver", "ipopt", self._nlp,
+    #                                          warm_solve_opts)
+    #
+    #
+    #     if x0 is None: x0 = self._result['x']
+    #     if lam_x is None: lam_x = self._result['lam_x']
+    #     if lam_g is None: lam_g = self._result['lam_g']
+    #
+    #     solver.setInput(x0, 'x0')
+    #     solver.setInput(self.var.vars_lb, 'lbx')
+    #     solver.setInput(self.var.vars_ub, 'ubx')
+    #     solver.setInput(self.col_vars['lbg'], 'lbg')
+    #     solver.setInput(self.col_vars['ubg'], 'ubg')
+    #     solver.setInput(self.pvar.vars_in, 'p')
+    #     solver.setInput(lam_x, 'lam_x0')
+    #     solver.setInput(lam_g, 'lam_g0')
+    #     solver.setOutput(lam_x, "lam_x")
+    #
+    #     self._solver.evaluate()
+    #
+    #     if self._solver.getStat('return_status') != 'Solve_Succeeded':
+    #         raise RuntimeWarning('Solve status: {}'.format(
+    #             self._solver.getStat('return_status')))
+    #
+    #     self._result = {
+    #         'x' : self._solver.getOutput('x'),
+    #         'lam_x' : self._solver.getOutput('lam_x'),
+    #         'lam_g' : self._solver.getOutput('lam_g'),
+    #         'f' : self._solver.getOutput('f'),
+    #     }
+    #
+    #     # Process the optimal vector
+    #     self.var.vars_op = self._result['x']
+    #
+    #     # Store the optimal solution as initial vectors for the next go-around
+    #     self.var.vars_in = self.var.vars_op
+    #
+    #     try: self._plot_setup()
+    #     except AttributeError: pass
+    #
+    #     return float(self._result['f'])
 
-        """
-        warm_solve_opts = dict(self._solver_opts)
-
-        warm_solve_opts["warm_start_init_point"] = "yes"
-        warm_solve_opts["warm_start_bound_push"] = 1e-6
-        warm_solve_opts["warm_start_slack_bound_push"] = 1e-6
-        warm_solve_opts["warm_start_mult_bound_push"] = 1e-6
-
-        solver = self._solver = cs.NlpSolver("solver", "ipopt", self._nlp,
-                                             warm_solve_opts)
-
-
-        if x0 is None: x0 = self._result['x']
-        if lam_x is None: lam_x = self._result['lam_x']
-        if lam_g is None: lam_g = self._result['lam_g']
-
-        solver.setInput(x0, 'x0')
-        solver.setInput(self.var.vars_lb, 'lbx')
-        solver.setInput(self.var.vars_ub, 'ubx')
-        solver.setInput(self.col_vars['lbg'], 'lbg')
-        solver.setInput(self.col_vars['ubg'], 'ubg')
-        solver.setInput(self.pvar.vars_in, 'p')
-        solver.setInput(lam_x, 'lam_x0')
-        solver.setInput(lam_g, 'lam_g0')
-        solver.setOutput(lam_x, "lam_x")
-
-        self._solver.evaluate()
-
-        if self._solver.getStat('return_status') != 'Solve_Succeeded':
-            raise RuntimeWarning('Solve status: {}'.format(
-                self._solver.getStat('return_status')))
-
-        self._result = {
-            'x' : self._solver.getOutput('x'),
-            'lam_x' : self._solver.getOutput('lam_x'),
-            'lam_g' : self._solver.getOutput('lam_g'),
-            'f' : self._solver.getOutput('f'),
-        }
-
-        # Process the optimal vector
-        self.var.vars_op = self._result['x']
-
-        # Store the optimal solution as initial vectors for the next go-around
-        self.var.vars_in = self.var.vars_op
-
-        try: self._plot_setup()
-        except AttributeError: pass
-
-        return float(self._result['f'])
+    def _get_endpoint_expr(self, state_sx):
+        """Use the variables in self.col_vars['D'] for find an expression for
+        the end of the finite element """
+        return cs.mtimes(cs.DM(self.col_vars['D']).T, state_sx).T
+        
 
     def __getstate__(self):
         result = self.__dict__.copy()

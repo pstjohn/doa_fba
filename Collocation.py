@@ -15,9 +15,9 @@ class Collocation(BaseCollocation):
         """ A class to handle the optimization of kinetic uptake parameters to
         match a dynamic model to a given set of experimental data.
 
-        model: a cs.SXFunction object
+        model: dict
             a model that describes substrate uptake and biomass formation
-            kinetics. Inputs should be [t, x, p], outputs should be [ode]
+            kinetics. Inputs should be {t, x, p, ode}
 
         boundary_species: list
             List of string ID's for each of the states in the model. The first
@@ -25,14 +25,16 @@ class Collocation(BaseCollocation):
 
         """
         # Assign sizing variables
-        self.nx = model.mx_in(1).shape[0]
-        self.np = model.mx_in(2).shape[0]
+        self.nx = model['x'].shape[0]
+        self.np = model['p'].shape[0]
 
-        assert model.mx_out(0).shape[0] == self.nx, \
+        assert model['ode'].shape[0] == self.nx, \
             "Output length mismatch"
 
         # Attach model
-        self.dxdt = model
+        self.dxdt = cs.Function('dxdt', [model['t'], model['x'], model['p']],
+                                [model['ode']])
+        self._model_dict = model
 
         # Attach state names
         assert len(boundary_species) == self.nx, "Name length mismatch"
@@ -104,15 +106,13 @@ class Collocation(BaseCollocation):
 
                 # Get an expression for the state derivative at the collocation
                 # point
-                xp_jk = 0
-                for r in range(self.d+1):
-                    xp_jk += self.col_vars['C'][r,j]*cs.SX(self.var.x_sx[k,r])
+                xp_jk = cs.mtimes(cs.DM(self.col_vars['C'][:,j]).T, self.var.x_sx[k]).T
 
                 # Add collocation equations to the NLP.
                 # Boundary fluxes are calculated by multiplying the EFM
                 # coefficients in V by the efm matrix
                 [fk] = self.dxdt.call(
-                    [T[k,j], cs.SX(self.var.x_sx[k,j]), cs.SX(self.var.p_sx)])
+                    [T[k,j], self.var.x_sx[k,j], self.var.p_sx[:]])
 
                 self.add_constraint(h * fk - xp_jk)
 
@@ -120,12 +120,12 @@ class Collocation(BaseCollocation):
             if k+1 != self.nk:
                 
                 # Get an expression for the state at the end of the finite
-                # element
-                xf_k = self.col_vars['D'].dot(cs.SX(self.var.x_sx[k]))
-                self.add_constraint(cs.SX(self.var.x_sx[k+1,0]) - xf_k)
+                # element for each state
+                self.add_constraint(self.var.x_sx[k+1,0] - 
+                                    self._get_endpoint_expr(self.var.x_sx[k]))
 
         # Get an expression for the endpoint for objective purposes
-        xf = self.col_vars['D'].dot(cs.SX(self.var.x_sx[-1]))
+        xf = self._get_endpoint_expr(self.var.x_sx[-1])
         self.xf = {met : x_sx for met, x_sx in zip(self.boundary_species, xf)}
 
         # Similarly, get an expression for the beginning point
@@ -136,8 +136,8 @@ class Collocation(BaseCollocation):
         """ Initialize the objective function to minimize the absolute value of
         the flux vector """
 
-        self.objective_sx += (self.pvar.alpha_sx *
-                              cs.fabs(self.var.p_sx).sum())
+        self.objective_sx += (self.pvar.alpha_sx[:] *
+                              cs.sum1(cs.fabs(self.var.p_sx[:])))
 
 
     def _plot_setup(self):
@@ -176,10 +176,15 @@ class Collocation(BaseCollocation):
         finite_element = int(t / h)
         tau = (t % h) / h
         basis = np.asarray(self.col_vars['lfcn'](tau)).flatten()
-        x = getattr(self.var, 'x_' + x_rep)
-        x_roots = x[finite_element, :, states]
+        if x_rep != 'sx':
+            x = getattr(self.var, 'x_' + x_rep)
+            x_roots = x[finite_element, :, states]
+            return np.inner(basis, x_roots)
 
-        return np.inner(basis, x_roots)
+        else:
+            x_roots = self.var.x_sx[finite_element, :, states]
+            return cs.dot(basis, x_roots)
+
 
     def set_data(self, data, weights=None):
         """ Attach experimental measurement data.
@@ -214,7 +219,7 @@ class Collocation(BaseCollocation):
         for ((ti, state), xi) in data.stack().items():
             obj_list += [(self._get_interp(ti, [state]) - xi) / weights[state]]
 
-        obj_resid = cs.sum_square(cs.vertcat(obj_list))
+        obj_resid = cs.sum_square(cs.vertcat(*obj_list))
         self.objective_sx += obj_resid
 
 
@@ -238,28 +243,24 @@ class Collocation(BaseCollocation):
 
 
         self.ts.sort() # Assert ts is increasing
+                                     
+        integrator = cs.integrator(
+            'int', 'cvodes', self._model_dict,
+            {
+                'grid': self.ts,
+                'output_t0': True,
+            })
 
-        f_integrator = cs.SXFunction('ode',
-                                     cs.daeIn(
-                                         t = self.dxdt.inputExpr(0),
-                                         x = self.dxdt.inputExpr(1),
-                                         p = self.dxdt.inputExpr(2)),
-                                     cs.daeOut(
-                                         ode = self.dxdt.outputExpr(0)))
 
-        integrator = cs.Integrator('int', 'cvodes', f_integrator)
-        simulator = cs.Simulator('sim', integrator, self.ts)
-        simulator.setInput(self.sol[0], 'x0')
-        simulator.setInput(self.var.p_op, 'p')
-        simulator.evaluate()
-        x_sim = self.sol_sim = np.array(simulator.getOutput()).T
+        x_sim = self.sol_sim = np.array(integrator(
+            x0=self.sol[0], p=self.var.p_op)['xf']).T
 
         err = ((self.sol - x_sim).mean(0) /
                (self.sol.mean(0))).mean()
 
         if err > 1E-3: warn(
-                'Collocation does not match ODE Solution: \
-                {:.2%} Error'.format(err))
+                'Collocation does not match ODE Solution: '
+                '{:.2%} Error'.format(err))
 
 
     def plot_optimal(self):
